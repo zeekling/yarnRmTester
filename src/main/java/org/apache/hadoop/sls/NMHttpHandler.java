@@ -2,48 +2,36 @@ package org.apache.hadoop.sls;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import org.apache.hadoop.sls.util.CommonUtils;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 public class NMHttpHandler implements HttpHandler {
-    @Override
-    public void handle(HttpExchange exchange) throws IOException {
-        handleResponse(exchange, "<strong> Fake NodeManager </strong>");
 
+
+    private final YarnFakeNodeManager nodeManager;
+
+    public NMHttpHandler(YarnFakeNodeManager nodeManager) {
+        this.nodeManager = nodeManager;
     }
 
-
-    private String getRequestParam(HttpExchange httpExchange) throws IOException {
-        String paramStr = "";
-
-        if (httpExchange.getRequestMethod().equals("GET")) {
-            //GET请求读queryString
-            paramStr = httpExchange.getRequestURI().getQuery();
-        } else {
-            //非GET请求读请求体
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(httpExchange.getRequestBody(), StandardCharsets.UTF_8));
-            StringBuilder requestBodyContent = new StringBuilder();
-            String line = null;
-            while ((line = bufferedReader.readLine()) != null) {
-                requestBodyContent.append(line);
-            }
-            paramStr = requestBodyContent.toString();
-        }
-
-        return paramStr;
+    @Override
+    public void handle(HttpExchange exchange) throws IOException {
+        StringBuilder sb = new StringBuilder("<p><strong> Fake NodeManager ").append(nodeManager.getNodeId()).append(" </strong></p>");
+        sb.append("Rack: ").append(nodeManager.getRackName()).append("<br>");
+        sb.append("Capacity: ").append(CommonUtils.getResourceStr(nodeManager.getCapability())).append("<br>");
+        sb.append("Avail: ").append(CommonUtils.getResourceStr(nodeManager.getAvailable())).append("<br>");
+        sb.append("Used: ").append(CommonUtils.getResourceStr(nodeManager.getUsed())).append("<br>");
+        sb.append("Version: 1.0<br>");
+        handleResponse(exchange, sb.toString());
     }
 
     private void handleResponse(HttpExchange httpExchange, String responsetext) throws IOException {
-        //生成html
-        String responseContentStr = "<html>" +
-                "<body>" +
+        String responseContentStr = "<html><head> <title>NodeManager information </title> </head><body>" +
                 responsetext +
-                "</body>" +
-                "</html>";
+                "</body></html>";
         byte[] responseContentByte = responseContentStr.getBytes(StandardCharsets.UTF_8);
 
         httpExchange.getResponseHeaders().add("Content-Type:", "text/html;charset=utf-8");

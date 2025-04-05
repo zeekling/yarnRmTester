@@ -23,21 +23,13 @@ import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResp
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
 import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
-import org.apache.hadoop.yarn.server.nodemanager.Context;
-import org.apache.hadoop.yarn.server.nodemanager.LocalDirsHandlerService;
-import org.apache.hadoop.yarn.server.nodemanager.NodeManager;
-import org.apache.hadoop.yarn.server.nodemanager.ResourceView;
-import org.apache.hadoop.yarn.server.nodemanager.health.NodeHealthCheckerService;
+
 import org.apache.hadoop.yarn.server.nodemanager.security.NMTokenSecretManagerInNM;
-import org.apache.hadoop.yarn.server.nodemanager.webapp.ContainerShellWebSocketServlet;
-import org.apache.hadoop.yarn.server.nodemanager.webapp.TerminalServlet;
-import org.apache.hadoop.yarn.server.nodemanager.webapp.WebServer;
-import org.apache.hadoop.yarn.server.security.ApplicationACLsManager;
+
 import org.apache.hadoop.yarn.server.utils.BuilderUtils;
 import org.apache.hadoop.yarn.util.YarnVersionInfo;
 import org.apache.hadoop.yarn.util.resource.Resources;
-import org.apache.hadoop.yarn.webapp.WebApp;
-import org.apache.hadoop.yarn.webapp.WebApps;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,14 +52,13 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     final private String rackName;
     final private NodeId nodeId;
     final private Resource capability;
-    Resource available = recordFactory.newRecordInstance(Resource.class);
-    Resource used = recordFactory.newRecordInstance(Resource.class);
+    private final Resource available;
+    private final Resource used;
 
     final ResourceTracker resourceTracker;
-    final Map<ApplicationId, List<Container>> containers = new HashMap<ApplicationId, List<Container>>();
+    final Map<ApplicationId, List<Container>> containers = new HashMap<>();
 
-    final Map<Container, ContainerStatus> containerStatusMap = new HashMap<Container, ContainerStatus>();
-
+    final Map<Container, ContainerStatus> containerStatusMap = new HashMap<>();
 
     private int responseID = 0;
 
@@ -75,9 +66,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private long tokenSequenceNo;
 
-    private ResourceUtilization nodeUtilization = null;
-
-    private WebApp webApp;
+    private final ResourceUtilization nodeUtilization;
 
     private final ResourceUtilization containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
 
@@ -88,7 +77,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         this.rackName = rackName;
         this.resourceTracker = ServerRMProxy.createRMProxy(config, ResourceTracker.class);
         this.capability = capability;
-        Resources.addTo(available, capability);
+        this.available = Resource.newInstance(capability);
+        this.used = Resource.newInstance(0, 0);
         this.nodeId = NodeId.newInstance(hostName, containerManagerPort);
         Map<String, Float> customResources = new HashMap<>();
         customResources.put("yarn.io/gpu", 0f);
@@ -100,18 +90,18 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         request.setPhysicalResource(capability);
         request.setNodeId(this.nodeId);
         request.setNMVersion(YarnVersionInfo.getVersion());
-        LOG.info("begin register NodeManager {}", nodeId);
+        LOG.info("begin register NodeManager {} capacity={}, available={}, used={}", nodeId, this.capability, this.available, this.used);
         RegisterNodeManagerResponse response = resourceTracker.registerNodeManager(request);
         nmTokenMasterKey = response.getNMTokenMasterKey();
-        LOG.info("Register NodeManager {} success", nodeId);
+        LOG.info("Register NodeManager {}  success", nodeId);
         initRpcServer(config, containerManagerPort, hostName);
-        initHttpServer(config, httpPort, hostName);
+        initHttpServer(httpPort, hostName);
     }
 
-    private void initHttpServer(YarnConfiguration config, int port, String hostName) throws IOException {
+    private void initHttpServer(int port, String hostName) throws IOException {
         InetSocketAddress addr = NetUtils.createSocketAddr(hostName + ":" + port);
         HttpServer httpServer = HttpServer.create(addr, 0);
-        httpServer.createContext("/", new NMHttpHandler());
+        httpServer.createContext("/", new NMHttpHandler(this));
         httpServer.setExecutor(Executors.newFixedThreadPool(2));
         httpServer.start();
     }
@@ -123,7 +113,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
         tokenSecretManager.setMasterKey(nmTokenMasterKey);
         Server server = rpc.getServer(ContainerManagementProtocol.class,
-                        this, addr, config, tokenSecretManager, 10);
+                this, addr, config, tokenSecretManager, 10);
         server.start();
         LOG.info("Init rpc {}:{} success", hostName, port);
     }
@@ -165,8 +155,24 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return nodeId;
     }
 
+    public Resource getCapability() {
+        return capability;
+    }
+
+    public String getRackName() {
+        return rackName;
+    }
+
+    public Resource getAvailable() {
+        return available;
+    }
+
+    public Resource getUsed() {
+        return used;
+    }
+
     private List<ContainerStatus> getContainerStatuses(Map<ApplicationId, List<Container>> containers) {
-        List<ContainerStatus> containerStatuses = new ArrayList<ContainerStatus>();
+        List<ContainerStatus> containerStatuses = new ArrayList<>();
         for (List<Container> appContainers : containers.values()) {
             for (Container container : appContainers) {
                 containerStatuses.add(containerStatusMap.get(container));
@@ -176,10 +182,10 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     @Override
-    public StartContainersResponse startContainers(StartContainersRequest requests) throws YarnException, IOException {
+    public StartContainersResponse startContainers(StartContainersRequest requests) throws YarnException {
         for (StartContainerRequest request : requests.getStartContainerRequests()) {
             Token containerToken = request.getContainerToken();
-            ContainerTokenIdentifier tokenId = null;
+            ContainerTokenIdentifier tokenId;
 
             try {
                 tokenId = BuilderUtils.newContainerTokenIdentifier(containerToken);
@@ -191,7 +197,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             ApplicationId applicationId =
                     containerID.getApplicationAttemptId().getApplicationId();
 
-            List<Container> applicationContainers = containers.computeIfAbsent(applicationId, k -> new ArrayList<Container>());
+            List<Container> applicationContainers = containers.computeIfAbsent(applicationId, k -> new ArrayList<>());
 
             // Sanity check
             for (Container container : applicationContainers) {
@@ -219,13 +225,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                     container, available, used);
 
         }
-        StartContainersResponse response =
-                StartContainersResponse.newInstance(null, null, null);
-        return response;
+        return StartContainersResponse.newInstance(null, null, null);
     }
 
     @Override
-    public StopContainersResponse stopContainers(StopContainersRequest request) throws YarnException, IOException {
+    public StopContainersResponse stopContainers(StopContainersRequest request) {
         for (ContainerId containerID : request.getContainerIds()) {
             String applicationId =
                     String.valueOf(containerID.getApplicationAttemptId()
@@ -270,7 +274,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     @Override
     public GetContainerStatusesResponse getContainerStatuses(GetContainerStatusesRequest request) {
-        List<ContainerStatus> statuses = new ArrayList<ContainerStatus>();
+        List<ContainerStatus> statuses = new ArrayList<>();
         for (ContainerId containerId : request.getContainerIds()) {
             List<Container> appContainers =
                     containers.get(containerId.getApplicationAttemptId()
@@ -301,37 +305,37 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     @Override
-    public SignalContainerResponse signalToContainer(SignalContainerRequest request) throws YarnException, IOException {
+    public SignalContainerResponse signalToContainer(SignalContainerRequest request) throws YarnException {
         throw new YarnException("Not supported yet!");
     }
 
     @Override
-    public ResourceLocalizationResponse localize(ResourceLocalizationRequest request) throws YarnException, IOException {
+    public ResourceLocalizationResponse localize(ResourceLocalizationRequest request) {
         return null;
     }
 
     @Override
-    public ReInitializeContainerResponse reInitializeContainer(ReInitializeContainerRequest request) throws YarnException, IOException {
+    public ReInitializeContainerResponse reInitializeContainer(ReInitializeContainerRequest request) {
         return null;
     }
 
     @Override
-    public RestartContainerResponse restartContainer(ContainerId containerId) throws YarnException, IOException {
+    public RestartContainerResponse restartContainer(ContainerId containerId) {
         return null;
     }
 
     @Override
-    public RollbackResponse rollbackLastReInitialization(ContainerId containerId) throws YarnException, IOException {
+    public RollbackResponse rollbackLastReInitialization(ContainerId containerId) {
         return null;
     }
 
     @Override
-    public CommitResponse commitLastReInitialization(ContainerId containerId) throws YarnException, IOException {
+    public CommitResponse commitLastReInitialization(ContainerId containerId) {
         return null;
     }
 
     @Override
-    public GetLocalizationStatusesResponse getLocalizationStatuses(GetLocalizationStatusesRequest request) throws YarnException, IOException {
+    public GetLocalizationStatusesResponse getLocalizationStatuses(GetLocalizationStatusesRequest request) {
         return null;
     }
 }

@@ -17,6 +17,10 @@
 <!-- Site specific YARN configuration properties -->
 
 	<property>
+		<name>yarn.resourcemanager.resource-tracker.address</name>
+		<value>zeekling:8031</value>
+	</property>
+	<property>
        <name>yarn.nodemanager.resource.memory-mb</name>
 	   <value>512000</value>
 	</property>
