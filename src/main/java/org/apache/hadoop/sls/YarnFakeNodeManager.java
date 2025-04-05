@@ -10,10 +10,16 @@ import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.factories.RecordFactory;
 import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
 import org.apache.hadoop.yarn.ipc.RPCUtil;
+import org.apache.hadoop.yarn.nodelabels.CommonNodeLabelsManager;
 import org.apache.hadoop.yarn.security.ContainerTokenIdentifier;
 import org.apache.hadoop.yarn.server.api.ResourceTracker;
 import org.apache.hadoop.yarn.server.api.ServerRMProxy;
+import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatRequest;
+import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatResponse;
 import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerRequest;
+import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResponse;
+import org.apache.hadoop.yarn.server.api.records.MasterKey;
+import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
 import org.apache.hadoop.yarn.server.resourcemanager.ResourceManager;
 import org.apache.hadoop.yarn.server.resourcemanager.ResourceTrackerService;
@@ -32,8 +38,7 @@ import java.util.*;
 public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(YarnFakeNodeManager.class);
+    private static final Logger LOG = LoggerFactory.getLogger(YarnFakeNodeManager.class);
     private static final RecordFactory recordFactory = RecordFactoryProvider.getRecordFactory(null);
 
     final private String containerManagerAddress;
@@ -46,11 +51,19 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     Resource used = recordFactory.newRecordInstance(Resource.class);
 
     final ResourceTracker resourceTracker;
-    final Map<ApplicationId, List<Container>> containers =
-            new HashMap<ApplicationId, List<Container>>();
+    final Map<ApplicationId, List<Container>> containers = new HashMap<ApplicationId, List<Container>>();
 
-    final Map<Container, ContainerStatus> containerStatusMap =
-            new HashMap<Container, ContainerStatus>();
+    final Map<Container, ContainerStatus> containerStatusMap = new HashMap<Container, ContainerStatus>();
+
+    private int responseID = 0;
+
+    private final MasterKey nmTokenMasterKey;
+
+    private long tokenSequenceNo;
+
+    private ResourceUtilization nodeUtilization = null;
+
+    private final ResourceUtilization containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
 
     public YarnFakeNodeManager(String hostName, int containerManagerPort, int httpPort,
                                String rackName, Resource capability, YarnConfiguration config) throws IOException, YarnException {
@@ -62,15 +75,68 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         this.capability = capability;
         Resources.addTo(available, capability);
         this.nodeId = NodeId.newInstance(hostName, containerManagerPort);
+        Map<String, Float> customResources = new HashMap<>();
+        customResources.put("yarn.io/gpu", 0f);
+        nodeUtilization = ResourceUtilization.newInstance(0, 0, 0f, customResources);
         RegisterNodeManagerRequest request = recordFactory
                 .newRecordInstance(RegisterNodeManagerRequest.class);
         request.setHttpPort(httpPort);
         request.setResource(capability);
+        request.setPhysicalResource(capability);
         request.setNodeId(this.nodeId);
         request.setNMVersion(YarnVersionInfo.getVersion());
-        resourceTracker.registerNodeManager(request);
+        LOG.info("begin register NodeManager {}", nodeId);
+        RegisterNodeManagerResponse response = resourceTracker.registerNodeManager(request);
+        nmTokenMasterKey = response.getNMTokenMasterKey();
+        LOG.info("Register NodeManager {} success, nmTokenMasterKey={}", nodeId, response.getNMTokenMasterKey());
     }
 
+    private org.apache.hadoop.yarn.server.api.records.NodeStatus createNodeStatus(NodeId nodeId, List<ContainerStatus> containers) {
+        RecordFactory recordFactory = RecordFactoryProvider.getRecordFactory(null);
+        org.apache.hadoop.yarn.server.api.records.NodeStatus nodeStatus =
+                recordFactory.newRecordInstance(org.apache.hadoop.yarn.server.api.records.NodeStatus.class);
+        nodeStatus.setNodeId(nodeId);
+        nodeStatus.setNodeUtilization(nodeUtilization);
+        nodeStatus.setContainersUtilization(containersUtilization);
+        nodeStatus.setContainersStatuses(containers);
+        NodeHealthStatus nodeHealthStatus =
+                recordFactory.newRecordInstance(NodeHealthStatus.class);
+        nodeHealthStatus.setIsNodeHealthy(true);
+        nodeHealthStatus.setHealthReport("Healthy");
+        nodeHealthStatus.setLastHealthReportTime(System.currentTimeMillis());
+        nodeStatus.setNodeHealthStatus(nodeHealthStatus);
+        return nodeStatus;
+    }
+
+    public void heartbeat() throws IOException, YarnException {
+        NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
+        nodeStatus.setResponseId(responseID);
+        NodeHeartbeatRequest request =
+                NodeHeartbeatRequest.newInstance(nodeStatus,nmTokenMasterKey, nmTokenMasterKey,
+                        CommonNodeLabelsManager.EMPTY_NODELABEL_SET, null, null);
+        request.setNodeStatus(nodeStatus);
+        request.setTokenSequenceNo(tokenSequenceNo);
+        request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
+        request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
+        NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
+        responseID = response.getResponseId();
+        tokenSequenceNo = response.getTokenSequenceNo();
+        LOG.debug("response, responseID={}, nmTokenMasterKey={}, tokenSequenceNo={}", responseID, request.getLastKnownNMTokenMasterKey(), response.getTokenSequenceNo());
+    }
+
+    public NodeId getNodeId() {
+        return nodeId;
+    }
+
+    private List<ContainerStatus> getContainerStatuses(Map<ApplicationId, List<Container>> containers) {
+        List<ContainerStatus> containerStatuses = new ArrayList<ContainerStatus>();
+        for (List<Container> appContainers : containers.values()) {
+            for (Container container : appContainers) {
+                containerStatuses.add(containerStatusMap.get(container));
+            }
+        }
+        return containerStatuses;
+    }
 
     @Override
     public StartContainersResponse startContainers(StartContainersRequest requests) throws YarnException, IOException {
@@ -142,7 +208,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             int ctr = 0;
             Container container = null;
             for (Iterator<Container> i = applicationContainers.iterator(); i
-                    .hasNext();) {
+                    .hasNext(); ) {
                 container = i.next();
                 if (container.getId().compareTo(containerID) == 0) {
                     i.remove();
@@ -162,7 +228,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                             + " available={} used={}", containerManagerAddress, applicationId,
                     containerID, available, used);
         }
-        return StopContainersResponse.newInstance(null,null);
+        return StopContainersResponse.newInstance(null, null);
     }
 
     @Override

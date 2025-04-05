@@ -17,6 +17,8 @@ public class SLSConfig {
 
     public static final String SLS_NM_HTTP_PORT_BEGIN = "yarn.fake.nodemanger.http.port.begin";
 
+    public static final String SLS_THREAD_POOL_SIZE = "yarn.fake.threadpool.size";
+
     private final Properties properties = new Properties();
 
     public SLSConfig(String path) throws IOException {
@@ -43,5 +45,7 @@ public class SLSConfig {
         return Integer.parseInt(properties.getProperty(SLS_NM_HTTP_PORT_BEGIN, "2200"));
     }
 
-
+    public int getThreadPoolSize() {
+        return Integer.parseInt(properties.getProperty(SLS_THREAD_POOL_SIZE, "10"));
+    }
 }
