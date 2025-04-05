@@ -1,5 +1,6 @@
 package org.apache.hadoop.sls;
 
+import com.sun.net.httpserver.HttpServer;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
@@ -43,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.*;
+import java.util.concurrent.Executors;
 
 /**
  * fake NodeManager
@@ -103,41 +105,17 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         nmTokenMasterKey = response.getNMTokenMasterKey();
         LOG.info("Register NodeManager {} success", nodeId);
         initRpcServer(config, containerManagerPort, hostName);
-        // initHttpServer(config, httpPort, hostName);
+        initHttpServer(config, httpPort, hostName);
     }
 
-    private void initHttpServer(YarnConfiguration config, int port, String hostName) {
-        String bindAddress = hostName + ":" + port;
-        Map<String, String> params = new HashMap<String, String>();
-        Map<String, String> terminalParams = new HashMap<String, String>();
-        terminalParams.put("resourceBase", WebServer.class.getClassLoader().getResource("TERMINAL").toExternalForm());
-        terminalParams.put("dirAllowed", "false");
-        terminalParams.put("pathInfoOnly", "true");
-        Context nmContext = new NodeManager.NMContext(null, null, null, null,
-                null, false, config);
-        ResourceView resourceView = new FakeResourceView();
-        NodeHealthCheckerService healthChecker = createNodeHealthCheckerService();
-        healthChecker.init(config);
-        LocalDirsHandlerService dirsHandler = healthChecker.getDiskHandler();
-                WebServer.NMWebApp nmWebApp = new WebServer.NMWebApp(resourceView, new ApplicationACLsManager(config), dirsHandler);
-        webApp = WebApps.$for("node", Context.class, nmContext, "ws")
-                .at(bindAddress)
-                .withServlet("ContainerShellWebSocket", "/container/*",
-                        ContainerShellWebSocketServlet.class, params, false)
-                .withServlet("Terminal", "/terminal/*",
-                        TerminalServlet.class, terminalParams, false)
-                .with(config)
-                .withHttpSpnegoPrincipalKey(
-                        YarnConfiguration.NM_WEBAPP_SPNEGO_USER_NAME_KEY)
-                .withHttpSpnegoKeytabKey(
-                        YarnConfiguration.NM_WEBAPP_SPNEGO_KEYTAB_FILE_KEY)
-                .start(nmWebApp);
+    private void initHttpServer(YarnConfiguration config, int port, String hostName) throws IOException {
+        InetSocketAddress addr = NetUtils.createSocketAddr(hostName + ":" + port);
+        HttpServer httpServer = HttpServer.create(addr, 0);
+        httpServer.createContext("/", new NMHttpHandler());
+        httpServer.setExecutor(Executors.newFixedThreadPool(2));
+        httpServer.start();
     }
 
-    private NodeHealthCheckerService createNodeHealthCheckerService() {
-        LocalDirsHandlerService dirsHandler = new LocalDirsHandlerService();
-        return new NodeHealthCheckerService(dirsHandler);
-    }
 
     private void initRpcServer(YarnConfiguration config, int port, String hostName) {
         YarnRPC rpc = YarnRPC.create(config);
