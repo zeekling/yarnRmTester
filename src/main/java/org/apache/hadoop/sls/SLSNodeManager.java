@@ -24,6 +24,8 @@ public class SLSNodeManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(SLSNodeManager.class);
 
+    private static ExecutorService executor = null;
+
     public static void main(String[] args) throws IOException {
         String configPath = "/home/zeekling/project/gitea/yarnRmTester/src/main/resources";
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
@@ -34,8 +36,14 @@ public class SLSNodeManager {
         long memory = Long.parseLong(config.get(YarnConfiguration.NM_PMEM_MB));
         int vcore = Integer.parseInt(config.get(YarnConfiguration.NM_VCORES));
         Resource capacity = Resource.newInstance(memory, vcore);
-        ExecutorService executor = Executors.newFixedThreadPool(slsConfig.getThreadPoolSize());
+        executor = Executors.newFixedThreadPool(slsConfig.getThreadPoolSize());
         List<YarnFakeNodeManager> fakeNodeManagers = new ArrayList<>();
+        initFakeNM(slsConfig, capacity, config, fakeNodeManagers);
+        System.out.println("NM nodes count=" + fakeNodeManagers.size());
+        beginHeartBeat(fakeNodeManagers, executor);
+    }
+
+    private static void initFakeNM(SLSConfig slsConfig, Resource capacity, YarnConfiguration config, List<YarnFakeNodeManager> fakeNodeManagers) {
         List<Future<?>> futures = new ArrayList<>(slsConfig.getFakeNMCount());
         for (int i = 0; i < slsConfig.getFakeNMCount(); i++) {
             int finalI = i;
@@ -54,8 +62,6 @@ public class SLSNodeManager {
             futures.add(future);
         }
         CommonUtils.waitFutures(futures);
-        System.out.println("NM nodes count=" + fakeNodeManagers.size());
-        beginHeartBeat(fakeNodeManagers, executor);
     }
 
     private static void beginHeartBeat(List<YarnFakeNodeManager> fakeNodeManagers, ExecutorService executor) {
