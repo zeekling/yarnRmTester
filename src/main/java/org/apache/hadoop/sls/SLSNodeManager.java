@@ -39,7 +39,7 @@ public class SLSNodeManager {
         executor = Executors.newFixedThreadPool(slsConfig.getThreadPoolSize());
         List<YarnFakeNodeManager> fakeNodeManagers = new ArrayList<>();
         initFakeNM(slsConfig, capacity, config, fakeNodeManagers);
-        System.out.println("NM nodes count=" + fakeNodeManagers.size());
+        LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagers.size());
         beginHeartBeat(fakeNodeManagers, executor);
     }
 
