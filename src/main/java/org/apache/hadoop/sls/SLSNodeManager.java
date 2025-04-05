@@ -53,10 +53,10 @@ public class SLSNodeManager {
                     fakeNodeManager = new YarnFakeNodeManager(slsConfig.getHostName(),
                             slsConfig.getRpcBeginPort() + finalI, slsConfig.getHttpBeginPort() + finalI,
                             slsConfig.getSlsNmRack(), capacity, config);
+                    fakeNodeManagers.add(fakeNodeManager);
                 } catch (IOException | YarnException e) {
-                    LOG.warn("failed to init NodeManager");
+                    LOG.warn("failed to init NodeManager", e);
                 }
-                fakeNodeManagers.add(fakeNodeManager);
             };
             Future<?> future = executor.submit(runnable);
             futures.add(future);

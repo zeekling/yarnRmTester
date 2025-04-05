@@ -1,5 +1,9 @@
 package org.apache.hadoop.sls;
 
+import org.apache.hadoop.hdfs.protocol.ClientProtocol;
+import org.apache.hadoop.ipc.RPC;
+import org.apache.hadoop.ipc.Server;
+import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
@@ -10,6 +14,7 @@ import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.factories.RecordFactory;
 import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
 import org.apache.hadoop.yarn.ipc.RPCUtil;
+import org.apache.hadoop.yarn.ipc.YarnRPC;
 import org.apache.hadoop.yarn.nodelabels.CommonNodeLabelsManager;
 import org.apache.hadoop.yarn.security.ContainerTokenIdentifier;
 import org.apache.hadoop.yarn.server.api.ResourceTracker;
@@ -21,8 +26,7 @@ import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResp
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
 import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
-import org.apache.hadoop.yarn.server.resourcemanager.ResourceManager;
-import org.apache.hadoop.yarn.server.resourcemanager.ResourceTrackerService;
+import org.apache.hadoop.yarn.server.nodemanager.security.NMTokenSecretManagerInNM;
 import org.apache.hadoop.yarn.server.utils.BuilderUtils;
 import org.apache.hadoop.yarn.util.YarnVersionInfo;
 import org.apache.hadoop.yarn.util.resource.Resources;
@@ -30,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.*;
 
 /**
@@ -46,7 +51,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     final private String rackName;
     final private NodeId nodeId;
     final private Resource capability;
-    final private ApplicationClientProtocol rmClient;
     Resource available = recordFactory.newRecordInstance(Resource.class);
     Resource used = recordFactory.newRecordInstance(Resource.class);
 
@@ -71,7 +75,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         this.nodeHttpAddress = hostName + ":" + httpPort;
         this.rackName = rackName;
         this.resourceTracker = ServerRMProxy.createRMProxy(config, ResourceTracker.class);
-        this.rmClient = ClientRMProxy.createRMProxy(config, ApplicationClientProtocol.class);
         this.capability = capability;
         Resources.addTo(available, capability);
         this.nodeId = NodeId.newInstance(hostName, containerManagerPort);
@@ -88,7 +91,20 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         LOG.info("begin register NodeManager {}", nodeId);
         RegisterNodeManagerResponse response = resourceTracker.registerNodeManager(request);
         nmTokenMasterKey = response.getNMTokenMasterKey();
-        LOG.info("Register NodeManager {} success, nmTokenMasterKey={}", nodeId, response.getNMTokenMasterKey());
+        LOG.info("Register NodeManager {} success", nodeId);
+        initRpc(config, containerManagerPort, hostName);
+
+    }
+
+    private void initRpc(YarnConfiguration config, int port, String hostName) {
+        YarnRPC rpc = YarnRPC.create(config);
+        InetSocketAddress addr = NetUtils.createSocketAddr(hostName + ":" + port);
+        NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
+        tokenSecretManager.setMasterKey(nmTokenMasterKey);
+        Server server = rpc.getServer(ContainerManagementProtocol.class,
+                        this, addr, config, tokenSecretManager, 10);
+        server.start();
+        LOG.info("Init rpc {}:{} success", hostName, port);
     }
 
     private org.apache.hadoop.yarn.server.api.records.NodeStatus createNodeStatus(NodeId nodeId, List<ContainerStatus> containers) {
@@ -112,7 +128,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
         nodeStatus.setResponseId(responseID);
         NodeHeartbeatRequest request =
-                NodeHeartbeatRequest.newInstance(nodeStatus,nmTokenMasterKey, nmTokenMasterKey,
+                NodeHeartbeatRequest.newInstance(nodeStatus, nmTokenMasterKey, nmTokenMasterKey,
                         CommonNodeLabelsManager.EMPTY_NODELABEL_SET, null, null);
         request.setNodeStatus(nodeStatus);
         request.setTokenSequenceNo(tokenSequenceNo);
