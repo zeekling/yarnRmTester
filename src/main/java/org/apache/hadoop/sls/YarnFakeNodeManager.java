@@ -1,14 +1,10 @@
 package org.apache.hadoop.sls;
 
-import org.apache.hadoop.hdfs.protocol.ClientProtocol;
-import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.net.NetUtils;
-import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
-import org.apache.hadoop.yarn.client.ClientRMProxy;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.factories.RecordFactory;
@@ -26,10 +22,21 @@ import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResp
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
 import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
+import org.apache.hadoop.yarn.server.nodemanager.Context;
+import org.apache.hadoop.yarn.server.nodemanager.LocalDirsHandlerService;
+import org.apache.hadoop.yarn.server.nodemanager.NodeManager;
+import org.apache.hadoop.yarn.server.nodemanager.ResourceView;
+import org.apache.hadoop.yarn.server.nodemanager.health.NodeHealthCheckerService;
 import org.apache.hadoop.yarn.server.nodemanager.security.NMTokenSecretManagerInNM;
+import org.apache.hadoop.yarn.server.nodemanager.webapp.ContainerShellWebSocketServlet;
+import org.apache.hadoop.yarn.server.nodemanager.webapp.TerminalServlet;
+import org.apache.hadoop.yarn.server.nodemanager.webapp.WebServer;
+import org.apache.hadoop.yarn.server.security.ApplicationACLsManager;
 import org.apache.hadoop.yarn.server.utils.BuilderUtils;
 import org.apache.hadoop.yarn.util.YarnVersionInfo;
 import org.apache.hadoop.yarn.util.resource.Resources;
+import org.apache.hadoop.yarn.webapp.WebApp;
+import org.apache.hadoop.yarn.webapp.WebApps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,6 +66,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     final Map<Container, ContainerStatus> containerStatusMap = new HashMap<Container, ContainerStatus>();
 
+
     private int responseID = 0;
 
     private final MasterKey nmTokenMasterKey;
@@ -66,6 +74,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     private long tokenSequenceNo;
 
     private ResourceUtilization nodeUtilization = null;
+
+    private WebApp webApp;
 
     private final ResourceUtilization containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
 
@@ -92,11 +102,44 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         RegisterNodeManagerResponse response = resourceTracker.registerNodeManager(request);
         nmTokenMasterKey = response.getNMTokenMasterKey();
         LOG.info("Register NodeManager {} success", nodeId);
-        initRpc(config, containerManagerPort, hostName);
-
+        initRpcServer(config, containerManagerPort, hostName);
+        // initHttpServer(config, httpPort, hostName);
     }
 
-    private void initRpc(YarnConfiguration config, int port, String hostName) {
+    private void initHttpServer(YarnConfiguration config, int port, String hostName) {
+        String bindAddress = hostName + ":" + port;
+        Map<String, String> params = new HashMap<String, String>();
+        Map<String, String> terminalParams = new HashMap<String, String>();
+        terminalParams.put("resourceBase", WebServer.class.getClassLoader().getResource("TERMINAL").toExternalForm());
+        terminalParams.put("dirAllowed", "false");
+        terminalParams.put("pathInfoOnly", "true");
+        Context nmContext = new NodeManager.NMContext(null, null, null, null,
+                null, false, config);
+        ResourceView resourceView = new FakeResourceView();
+        NodeHealthCheckerService healthChecker = createNodeHealthCheckerService();
+        healthChecker.init(config);
+        LocalDirsHandlerService dirsHandler = healthChecker.getDiskHandler();
+                WebServer.NMWebApp nmWebApp = new WebServer.NMWebApp(resourceView, new ApplicationACLsManager(config), dirsHandler);
+        webApp = WebApps.$for("node", Context.class, nmContext, "ws")
+                .at(bindAddress)
+                .withServlet("ContainerShellWebSocket", "/container/*",
+                        ContainerShellWebSocketServlet.class, params, false)
+                .withServlet("Terminal", "/terminal/*",
+                        TerminalServlet.class, terminalParams, false)
+                .with(config)
+                .withHttpSpnegoPrincipalKey(
+                        YarnConfiguration.NM_WEBAPP_SPNEGO_USER_NAME_KEY)
+                .withHttpSpnegoKeytabKey(
+                        YarnConfiguration.NM_WEBAPP_SPNEGO_KEYTAB_FILE_KEY)
+                .start(nmWebApp);
+    }
+
+    private NodeHealthCheckerService createNodeHealthCheckerService() {
+        LocalDirsHandlerService dirsHandler = new LocalDirsHandlerService();
+        return new NodeHealthCheckerService(dirsHandler);
+    }
+
+    private void initRpcServer(YarnConfiguration config, int port, String hostName) {
         YarnRPC rpc = YarnRPC.create(config);
         InetSocketAddress addr = NetUtils.createSocketAddr(hostName + ":" + port);
         NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();

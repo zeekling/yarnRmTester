@@ -2,5 +2,5 @@ yarn.fake.nodemanager.hostname=hadoop01
 yarn.fake.nodemanager.rack=	/default-rack
 yarn.fake.nodemanger.rpc.port.begin=12000
 yarn.fake.nodemanger.http.port.begin=22000
-yarn.fake.nodemanger.count=20
-yarn.fake.threadpool.size=10
+yarn.fake.nodemanger.count=1
+yarn.fake.threadpool.size=2
