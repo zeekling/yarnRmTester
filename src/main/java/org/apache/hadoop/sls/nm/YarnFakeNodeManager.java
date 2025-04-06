@@ -245,7 +245,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     @Override
-    public StartContainersResponse startContainers(StartContainersRequest requests) throws YarnException, IOException {
+    public synchronized StartContainersResponse startContainers(StartContainersRequest requests) throws YarnException, IOException {
         List<ContainerId> succeededContainers = new ArrayList<>();
         Map<ContainerId, SerializedException> failedContainers = new HashMap<>();
         for (StartContainerRequest request : requests.getStartContainerRequests()) {
@@ -327,7 +327,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     @Override
-    public StopContainersResponse stopContainers(StopContainersRequest request) {
+    public synchronized StopContainersResponse stopContainers(StopContainersRequest request) {
         for (ContainerId containerID : request.getContainerIds()) {
             ApplicationId applicationId = containerID.getApplicationAttemptId().getApplicationId();
             // Mark the container as COMPLETE
@@ -373,7 +373,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return StopContainersResponse.newInstance(null, null);
     }
 
-    public void stopApplication(ApplicationId applicationId) {
+    public synchronized void stopApplication(ApplicationId applicationId) {
         appMasterMap.remove(applicationId);
         // Mark the container as COMPLETE
         List<Container> applicationContainers = containers.get(applicationId);
