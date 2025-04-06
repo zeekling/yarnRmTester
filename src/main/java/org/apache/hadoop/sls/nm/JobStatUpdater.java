@@ -15,10 +15,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class JobStatUpdater {
 
@@ -43,7 +40,7 @@ public class JobStatUpdater {
 
     private void initUpdateThread() {
         Runnable runnable = () -> {
-            Map<NodeId, Future<?>> futureMap = new HashMap<>();
+            Map<NodeId, Future<?>> futureMap = new ConcurrentHashMap<>();
             while (!isStoped) {
                 for (YarnFakeNodeManager fakeNodeManager : fakeNodeManagers) {
                     Future<?> future = futureMap.get(fakeNodeManager.getNodeId());
@@ -51,8 +48,12 @@ public class JobStatUpdater {
                     if (future != null) {
                         try {
                             future.get(20, TimeUnit.MILLISECONDS);
-                        } catch (Exception e) {
+                        } catch (TimeoutException e) {
                             needUpdate = false;
+                        } catch (Exception e) {
+                            LOG.warn("updateContainerStatus exception", e);
+                            future.cancel(true);
+                            futureMap.remove(fakeNodeManager.getNodeId());
                         }
                     }
                     if (!needUpdate) {

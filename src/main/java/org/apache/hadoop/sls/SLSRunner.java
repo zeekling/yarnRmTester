@@ -4,10 +4,7 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeJob;
 import org.apache.hadoop.sls.util.CommonUtils;
-import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
-import org.apache.hadoop.yarn.client.ClientRMProxy;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,12 +37,13 @@ public class SLSRunner {
         List<Future<?>> futures = new ArrayList<>();
         while (count <= slsConfig.getJobCycleTimes()) {
             int finalCount = count;
-            for (int i=0; i < 100; i++) {
+            for (int i=0; i < 500; i++) {
                 int finalI = i;
                 Runnable runnable = () -> {
                     try {
                         FakeJob job = new FakeJob(config, slsConfig, "test_" + finalCount + "_" + finalI);
                         job.submit();
+                        Thread.sleep(200);
                     } catch (Exception e) {
                         LOG.warn("submit job failed");
                     }

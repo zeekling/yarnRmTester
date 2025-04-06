@@ -6,7 +6,6 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeAppMaster;
-import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
@@ -43,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 /**
@@ -64,9 +64,9 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final ResourceTracker resourceTracker;
 
-    private final Map<ApplicationId, List<Container>> containers = new HashMap<>();
-    private final Map<Container, ContainerStatus> containerStatusMap = new HashMap<>();
-    private final Map<ApplicationId, FakeAppMaster> appMasterMap = new HashMap<>();
+    private final Map<ApplicationId, List<Container>> containers = new ConcurrentHashMap<>();
+    private final Map<Container, ContainerStatus> containerStatusMap = new ConcurrentHashMap<>();
+    private final Map<ApplicationId, FakeAppMaster> appMasterMap = new ConcurrentHashMap<>();
 
     private int responseID = 0;
 
@@ -293,7 +293,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             Resources.subtractFrom(available, tokenId.getResource());
             Resources.addTo(used, tokenId.getResource());
 
-            LOG.info("startContainer: node={} application={} container={}"
+            LOG.debug("startContainer: node={} application={} container={}"
                             + " available={} used={}", containerManagerAddress, applicationId,
                     container, available, used);
             succeededContainers.add(containerID);
@@ -307,7 +307,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             return;
         }
         for (Map.Entry<ApplicationId, FakeAppMaster> entry : appMasterMap.entrySet()) {
-            ApplicationId appid = entry.getKey();
             FakeAppMaster appMaster = entry.getValue();
             if (appMaster.isRegistered()) {
                 try {
@@ -315,7 +314,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 } catch (Exception e) {
                     LOG.warn("update Container failed", e);
                     appMaster.failedApp(e.getMessage());
-                    appMasterMap.remove(entry);
                 }
             } else {
                 try {
@@ -323,7 +321,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 } catch (Exception e) {
                     LOG.warn("register failed", e);
                     appMaster.failedApp(e.getMessage());
-                    appMasterMap.remove(entry);
                 }
             }
         }
@@ -369,7 +366,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             Resources.addTo(available, container.getResource());
             Resources.subtractFrom(used, container.getResource());
 
-            LOG.info("stopContainer: node={} application={} container={}"
+            LOG.debug("stopContainer: node={} application={} container={}"
                             + " available={} used={}", containerManagerAddress, applicationId,
                     containerID, available, used);
         }
@@ -397,7 +394,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             i.remove();
             Resources.addTo(available, container.getResource());
             Resources.subtractFrom(used, container.getResource());
-            LOG.info("stopContainer: node={} application={} container={}"
+            LOG.debug("stopContainer: node={} application={} container={}"
                             + " available={} used={}", containerManagerAddress, applicationId,
                     container.getId(), available, used);
         }

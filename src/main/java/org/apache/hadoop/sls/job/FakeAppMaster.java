@@ -6,14 +6,13 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.sls.config.SLSConfig;
-import org.apache.hadoop.sls.nm.JobStatUpdater;
 import org.apache.hadoop.sls.nm.YarnFakeNodeManager;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
 import org.apache.hadoop.yarn.client.AMRMClientUtils;
-import org.apache.hadoop.yarn.client.ClientRMProxy;
+import org.apache.hadoop.yarn.exceptions.InvalidApplicationMasterRequestException;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.security.AMRMTokenIdentifier;
 import org.slf4j.Logger;
@@ -57,7 +56,7 @@ public class FakeAppMaster {
         try {
             UserGroupInformation currentUser = UserGroupInformation.getCurrentUser();
             Token<AMRMTokenIdentifier> amrmToken = getFirstAMRMToken(credentials.getAllTokens());
-            LOG.info("amrmToken={}", amrmToken);
+            LOG.debug("amrmToken={}", amrmToken);
             currentUser.addToken(amrmToken);
             currentUser.addCredentials(credentials);
             appMasterClient = AMRMClientUtils.createRMProxy(nodeManager.getConfig(), ApplicationMasterProtocol.class, currentUser, amrmToken);
@@ -82,18 +81,6 @@ public class FakeAppMaster {
         containers.add(container);
     }
 
-    public ApplicationId getApplicationId() {
-        return applicationId;
-    }
-
-    public List<Container> getContainers() {
-        return containers;
-    }
-
-    public long getAppStartTime() {
-        return appStartTime;
-    }
-
     public boolean isRegistered() {
         return isRegistered;
     }
@@ -101,7 +88,6 @@ public class FakeAppMaster {
     public void registerToRm() throws IOException, YarnException {
         RegisterApplicationMasterRequest request = RegisterApplicationMasterRequest.newInstance(nodeManager.getNodeId().getHost(), nodeManager.getNodeId().getPort(), "");
         appMasterClient.registerApplicationMaster(request);
-
         isRegistered = true;
     }
 
@@ -110,7 +96,7 @@ public class FakeAppMaster {
         if (containers.isEmpty()) {
             return;
         }
-        if (containers.size() <= slsConfig.getJobContainerNums() && currentTime - appStartTime < slsConfig.getJobDuration()) {
+        if (containers.size() <= slsConfig.getJobContainerNums()) {
             // 申请allocation
             allocateContainer();
             return;
@@ -121,7 +107,11 @@ public class FakeAppMaster {
         }
         nodeManager.stopApplication(applicationId);
         FinishApplicationMasterRequest request = FinishApplicationMasterRequest.newInstance(FinalApplicationStatus.SUCCEEDED, "run success", "");
-        appMasterClient.finishApplicationMaster(request);
+        try {
+            appMasterClient.finishApplicationMaster(request);
+        } catch (InvalidApplicationMasterRequestException e) {
+            LOG.debug("ignore error {}", e.getMessage());
+        }
     }
 
     public void allocateContainer() throws IOException, YarnException {
@@ -142,7 +132,7 @@ public class FakeAppMaster {
         if (allocatedContainers.isEmpty()) {
             return;
         }
-        LOG.info("allocated container {} ", Arrays.toString(allocatedContainers.toArray()));
+        LOG.debug("allocated container {} ", Arrays.toString(allocatedContainers.toArray()));
         List<StartContainerRequest> requests = new ArrayList<>();
         for (Container container: allocatedContainers) {
             ContainerLaunchContext launchContext = setupContainerLaunchContext();
@@ -172,6 +162,10 @@ public class FakeAppMaster {
     public void failedApp(String msg) throws IOException, YarnException {
         nodeManager.stopApplication(applicationId);
         FinishApplicationMasterRequest request = FinishApplicationMasterRequest.newInstance(FinalApplicationStatus.FAILED, msg, "");
-        appMasterClient.finishApplicationMaster(request);
+        try {
+            appMasterClient.finishApplicationMaster(request);
+        } catch (InvalidApplicationMasterRequestException e) {
+            LOG.debug("ignore error {}", e.getMessage());
+        }
     }
 }
