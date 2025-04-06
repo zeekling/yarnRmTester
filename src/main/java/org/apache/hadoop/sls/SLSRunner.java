@@ -37,13 +37,13 @@ public class SLSRunner {
         List<Future<?>> futures = new ArrayList<>();
         while (count <= slsConfig.getJobCycleTimes()) {
             int finalCount = count;
-            for (int i=0; i < 200; i++) {
+            for (int i=0; i < 50; i++) {
                 int finalI = i;
                 Runnable runnable = () -> {
                     try {
                         FakeJob job = new FakeJob(config, slsConfig, "test_" + finalCount + "_" + finalI);
                         job.submit();
-                        Thread.sleep(200);
+                        Thread.sleep(3000);
                     } catch (Exception e) {
                         LOG.warn("submit job failed");
                     }

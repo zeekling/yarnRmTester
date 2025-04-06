@@ -197,6 +197,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 }
             }
             if (containersAll.isEmpty()) {
+                LOG.info("Application {} finished", applicationId);
                 containers.remove(applicationId);
             }
         }
@@ -346,17 +347,15 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             // Remove container and update status
             int ctr = 0;
             Container container = null;
-            for (Iterator<Container> i = applicationContainers.iterator(); i
-                    .hasNext(); ) {
-                container = i.next();
+            for (Container applicationContainer : applicationContainers) {
+                container = applicationContainer;
                 if (container.getId().compareTo(containerID) == 0) {
-                    i.remove();
+                    ContainerStatus containerStatus = containerStatusMap.get(container);
+                    containerStatus.setDiagnostics("stoped");
+                    containerStatus.setExitStatus(0);
+                    containerStatus.setState(ContainerState.COMPLETE);
                     ++ctr;
                 }
-            }
-            if (applicationContainers.isEmpty()) {
-                containers.remove(applicationId);
-                appMasterMap.remove(applicationId);
             }
 
             if (ctr != 1) {
@@ -391,7 +390,10 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         for (Iterator<Container> i = applicationContainers.iterator(); i
                 .hasNext(); ) {
             container = i.next();
-            i.remove();
+            ContainerStatus containerStatus = containerStatusMap.get(container);
+            containerStatus.setDiagnostics("app finished");
+            containerStatus.setExitStatus(0);
+            containerStatus.setState(ContainerState.COMPLETE);
             Resources.addTo(available, container.getResource());
             Resources.subtractFrom(used, container.getResource());
             LOG.debug("stopContainer: node={} application={} container={}"
