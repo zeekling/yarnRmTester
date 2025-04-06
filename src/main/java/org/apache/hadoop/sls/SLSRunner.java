@@ -43,7 +43,7 @@ public class SLSRunner {
                     try {
                         FakeJob job = new FakeJob(config, slsConfig, "test_" + finalCount + "_" + finalI);
                         job.submit();
-                        Thread.sleep(3000);
+                        Thread.sleep(2000);
                     } catch (Exception e) {
                         LOG.warn("submit job failed");
                     }

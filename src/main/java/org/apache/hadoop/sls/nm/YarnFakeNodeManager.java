@@ -235,6 +235,10 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return slsConfig;
     }
 
+    public Map<Container, ContainerStatus> getContainerStatusMap() {
+        return containerStatusMap;
+    }
+
     private List<ContainerStatus> getContainerStatuses(Map<ApplicationId, List<Container>> containers) {
         List<ContainerStatus> containerStatuses = new ArrayList<>();
         for (List<Container> appContainers : containers.values()) {
@@ -284,7 +288,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             FakeAppMaster appMaster = null;
             if (tokenIdentifier.getContainerType().equals(ContainerType.APPLICATION_MASTER)) {
                 appMaster = new FakeAppMaster(applicationId, this, credentials);
-                appMaster.addContainer(container);
+                appMaster.addMasterContainer(container);
                 appMasterMap.put(applicationId, appMaster);
             } else {
                 appMaster = appMasterMap.get(applicationId);

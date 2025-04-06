@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FakeAppMaster {
 
@@ -28,7 +29,7 @@ public class FakeAppMaster {
 
     private final ApplicationId applicationId;
 
-    private final List<Container> containers = new ArrayList<>();
+    private final Map<Container, Long> containers = new ConcurrentHashMap<>();
 
     private final long appStartTime;
 
@@ -44,8 +45,11 @@ public class FakeAppMaster {
 
     private int lastResponseID = 0;
 
-
     private boolean containerAllocated = false;
+
+    private int containerCount = 0;
+
+    private Container appMaster = null;
 
     public FakeAppMaster(ApplicationId applicationId, YarnFakeNodeManager nodeManager, Credentials credentials) {
         this.applicationId = applicationId;
@@ -77,8 +81,17 @@ public class FakeAppMaster {
         return null;
     }
 
-    public void addContainer(Container container) {
-        containers.add(container);
+    public synchronized void addMasterContainer(Container container) {
+        containers.put(container, System.currentTimeMillis());
+        if (appMaster != null) {
+            appMaster = container;
+        }
+        containerCount++;
+    }
+
+    public synchronized void addContainer(Container container) {
+        containers.put(container, System.currentTimeMillis());
+        containerCount++;
     }
 
     public boolean isRegistered() {
@@ -92,16 +105,18 @@ public class FakeAppMaster {
     }
 
     public void updateContainer() throws IOException, YarnException {
-        long currentTime = System.currentTimeMillis();
+
         if (containers.isEmpty()) {
             return;
         }
-        if (containers.size() <= slsConfig.getJobContainerNums()) {
+
+        checkFinished();
+        if (containerCount <= slsConfig.getJobContainerNums()) {
             // 申请allocation
             allocateContainer();
             return;
         }
-
+        long currentTime = System.currentTimeMillis();
         if (currentTime - appStartTime < slsConfig.getJobDuration()) {
             return;
         }
@@ -111,6 +126,27 @@ public class FakeAppMaster {
             appMasterClient.finishApplicationMaster(request);
         } catch (InvalidApplicationMasterRequestException e) {
             LOG.debug("ignore error {}", e.getMessage());
+        }
+    }
+
+    private void checkFinished() {
+        long currentTime = System.currentTimeMillis();
+        for (Map.Entry<Container, Long> entry: containers.entrySet()) {
+            Long time = entry.getValue();
+            Container container = entry.getKey();
+            if (currentTime - time < slsConfig.getJobDuration()) {
+                continue;
+            }
+            if (appMaster == null || appMaster == container) {
+                continue;
+            }
+            ContainerStatus containerStatus = nodeManager.getContainerStatusMap().get(container);
+            if (containerStatus == null) {
+                continue;
+            }
+            containerStatus.setDiagnostics("stoped");
+            containerStatus.setExitStatus(0);
+            containerStatus.setState(ContainerState.COMPLETE);
         }
     }
 
