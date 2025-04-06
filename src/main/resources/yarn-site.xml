@@ -48,6 +48,39 @@
 		<name>yarn.scheduler.minimum-allocation-vcores</name>
 		<value>1</value>
 	</property>
+
+	<property>
+		<name>yarn.node-labels.enabled</name>
+		<value>true</value>
+	</property>
+
+	<property>
+		<name>yarn.node-labels.fs-store.root-dir</name>
+		<value>/tmp/node-labels</value>
+	</property>
+
+	<property>
+		<name>yarn.app.fake.am.resource.memory-mb</name>
+		<value>1536</value>
+	</property>
+
+
+	<property>
+		<name>yarn.scheduler.capacity.root.default.maximum-capacity</name>
+		<value>100</value>
+	</property>
+
+
+	<property>
+		<name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+		<value>0.4</value>
+	</property>
+
+	<property>
+		<name>yarn.app.fake.am.resource.vcores</name>
+		<value>1</value>
+	</property>
+
 	<property>
        <name>yarn.nodemanager.resource.memory-mb</name>
 	   <value>512000</value>

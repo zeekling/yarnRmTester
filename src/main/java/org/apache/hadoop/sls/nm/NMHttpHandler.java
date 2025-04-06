@@ -1,4 +1,4 @@
-package org.apache.hadoop.sls;
+package org.apache.hadoop.sls.nm;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;

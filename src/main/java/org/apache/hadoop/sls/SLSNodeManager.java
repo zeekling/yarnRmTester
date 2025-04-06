@@ -1,6 +1,8 @@
 package org.apache.hadoop.sls;
 
 import org.apache.hadoop.sls.config.SLSConfig;
+import org.apache.hadoop.sls.nm.JobStatUpdater;
+import org.apache.hadoop.sls.nm.YarnFakeNodeManager;
 import org.apache.hadoop.sls.util.CommonUtils;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.api.records.Resource;
@@ -26,13 +28,14 @@ public class SLSNodeManager {
 
     private static ExecutorService executor = null;
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, YarnException {
         String configPath = "/home/zeekling/project/gitea/yarnRmTester/src/main/resources";
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
         config.addResource(configPath + File.separator + "core-site.xml");
         config.addResource(configPath + File.separator + "hdfs-site.xml");
         config.addResource(configPath + File.separator + "yarn-site.xml");
+
         long memory = Long.parseLong(config.get(YarnConfiguration.NM_PMEM_MB));
         int vcore = Integer.parseInt(config.get(YarnConfiguration.NM_VCORES));
         Resource capacity = Resource.newInstance(memory, vcore);
@@ -40,6 +43,8 @@ public class SLSNodeManager {
         List<YarnFakeNodeManager> fakeNodeManagers = new ArrayList<>();
         initFakeNM(slsConfig, capacity, config, fakeNodeManagers);
         LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagers.size());
+        JobStatUpdater updater = new JobStatUpdater(slsConfig, fakeNodeManagers, config);
+        updater.updateAsync();
         beginHeartBeat(fakeNodeManagers, executor);
     }
 
@@ -52,7 +57,7 @@ public class SLSNodeManager {
                 try {
                     fakeNodeManager = new YarnFakeNodeManager(slsConfig.getHostName(),
                             slsConfig.getRpcBeginPort() + finalI, slsConfig.getHttpBeginPort() + finalI,
-                            slsConfig.getSlsNmRack(), capacity, config);
+                            slsConfig.getSlsNmRack(), capacity, config, slsConfig);
                     fakeNodeManagers.add(fakeNodeManager);
                 } catch (IOException | YarnException e) {
                     LOG.warn("failed to init NodeManager", e);
