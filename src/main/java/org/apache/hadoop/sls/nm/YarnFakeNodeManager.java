@@ -26,6 +26,7 @@ import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatResponse;
 import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerRequest;
 import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResponse;
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
+import org.apache.hadoop.yarn.server.api.records.NodeAction;
 import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
 
@@ -69,7 +70,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private int responseID = 0;
 
-    private final MasterKey nmTokenMasterKey;
+    private MasterKey nmTokenMasterKey= null;
 
     private long tokenSequenceNo;
 
@@ -81,6 +82,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final YarnConfiguration config;
 
+    private final int httpPort;
+
     public YarnFakeNodeManager(String hostName, int containerManagerPort, int httpPort,
                                String rackName, Resource capability, YarnConfiguration config, SLSConfig slsConfig) throws IOException, YarnException {
         this.containerManagerAddress = hostName + ":" + containerManagerPort;
@@ -88,14 +91,21 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         this.rackName = rackName;
         this.resourceTracker = ServerRMProxy.createRMProxy(config, ResourceTracker.class);
         this.capability = capability;
+        this.httpPort = httpPort;
         this.available = Resource.newInstance(capability);
         this.used = Resource.newInstance(0, 0);
         this.nodeId = NodeId.newInstance(hostName, containerManagerPort);
         this.config = config;
         this.slsConfig = slsConfig;
         Map<String, Float> customResources = new HashMap<>();
-        customResources.put("yarn.io/gpu", 0f);
         nodeUtilization = ResourceUtilization.newInstance(0, 0, 0f, customResources);
+        customResources.put("yarn.io/gpu", 0f);
+        registerNodeManager();
+        initRpcServer(config, containerManagerPort, hostName);
+        initHttpServer(httpPort, hostName);
+    }
+
+    private void registerNodeManager() throws YarnException, IOException {
         RegisterNodeManagerRequest request = recordFactory.newRecordInstance(RegisterNodeManagerRequest.class);
         request.setHttpPort(httpPort);
         request.setResource(capability);
@@ -106,8 +116,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         RegisterNodeManagerResponse response = resourceTracker.registerNodeManager(request);
         nmTokenMasterKey = response.getNMTokenMasterKey();
         LOG.info("Register NodeManager {}  success", nodeId);
-        initRpcServer(config, containerManagerPort, hostName);
-        initHttpServer(httpPort, hostName);
     }
 
     private void initHttpServer(int port, String hostName) throws IOException {
@@ -156,6 +164,13 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
         request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
         NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
+        NodeAction nodeAction = response.getNodeAction();
+        if (nodeAction == NodeAction.RESYNC) {
+            registerNodeManager();
+            responseID = 0;
+            tokenSequenceNo = 0;
+            return;
+        }
         responseID = response.getResponseId();
         tokenSequenceNo = response.getTokenSequenceNo();
         List<ContainerId> toBeRemovedFromNM = response.getContainersToBeRemovedFromNM();
