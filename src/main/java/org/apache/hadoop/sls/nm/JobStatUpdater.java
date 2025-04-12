@@ -1,8 +1,6 @@
 package org.apache.hadoop.sls.nm;
 
-import org.apache.hadoop.sls.SLSNodeManager;
 import org.apache.hadoop.sls.config.SLSConfig;
-import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.client.ClientRMProxy;
@@ -12,16 +10,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+
+import static org.apache.hadoop.sls.nm.NodeManagerCommon.FAKE_NODE_MANAGER_MAP;
 
 public class JobStatUpdater {
 
     private static final Logger LOG = LoggerFactory.getLogger(JobStatUpdater.class);
 
-    private final List<YarnFakeNodeManager> fakeNodeManagers;
+    private final Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap;
 
     private Thread updateThread = null;
 
@@ -31,8 +29,8 @@ public class JobStatUpdater {
 
     private final ApplicationMasterProtocol appMasterClient;
 
-    public JobStatUpdater(SLSConfig slsConfig, List<YarnFakeNodeManager> fakeNodeManagers, YarnConfiguration config) throws IOException {
-        this.fakeNodeManagers = fakeNodeManagers;
+    public JobStatUpdater(SLSConfig slsConfig, Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap, YarnConfiguration config) throws IOException {
+        this.fakeNodeManagerMap = fakeNodeManagerMap;
         this.jobUpdatePool = Executors.newFixedThreadPool(slsConfig.getJobUpdateThreadPoolSize());
         this.appMasterClient = ClientRMProxy.createRMProxy(config, ApplicationMasterProtocol.class);
         initUpdateThread();
@@ -42,7 +40,8 @@ public class JobStatUpdater {
         Runnable runnable = () -> {
             Map<NodeId, Future<?>> futureMap = new ConcurrentHashMap<>();
             while (!isStoped) {
-                for (YarnFakeNodeManager fakeNodeManager : fakeNodeManagers) {
+                for (Map.Entry<NodeId, YarnFakeNodeManager> entry : FAKE_NODE_MANAGER_MAP.entrySet()) {
+                    YarnFakeNodeManager fakeNodeManager = entry.getValue();
                     Future<?> future = futureMap.get(fakeNodeManager.getNodeId());
                     boolean needUpdate = true;
                     if (future != null) {

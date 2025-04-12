@@ -5,7 +5,7 @@ import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.sls.config.SLSConfig;
-import org.apache.hadoop.sls.job.FakeAppMaster;
+import org.apache.hadoop.sls.job.FakeApplication;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
@@ -66,11 +66,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final Map<ApplicationId, List<Container>> containers = new ConcurrentHashMap<>();
     private final Map<Container, ContainerStatus> containerStatusMap = new ConcurrentHashMap<>();
-    private final Map<ApplicationId, FakeAppMaster> appMasterMap = new ConcurrentHashMap<>();
+    private final Map<ApplicationId, FakeApplication> applicationMap = new ConcurrentHashMap<>();
 
     private int responseID = 0;
 
-    private MasterKey nmTokenMasterKey= null;
+    private MasterKey nmTokenMasterKey = null;
 
     private long tokenSequenceNo;
 
@@ -155,27 +155,30 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     public void heartbeat() throws IOException, YarnException {
-        NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
-        nodeStatus.setResponseId(responseID);
-        NodeHeartbeatRequest request = NodeHeartbeatRequest.newInstance(nodeStatus, nmTokenMasterKey, nmTokenMasterKey,
-                CommonNodeLabelsManager.EMPTY_NODELABEL_SET, null, null);
-        request.setNodeStatus(nodeStatus);
-        request.setTokenSequenceNo(tokenSequenceNo);
-        request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
-        request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
-        NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
-        NodeAction nodeAction = response.getNodeAction();
-        if (nodeAction == NodeAction.RESYNC) {
-            registerNodeManager();
-            responseID = 0;
-            tokenSequenceNo = 0;
-            return;
+        try {
+            NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
+            nodeStatus.setResponseId(responseID);
+            NodeHeartbeatRequest request = NodeHeartbeatRequest.newInstance(nodeStatus, nmTokenMasterKey, nmTokenMasterKey,
+                    CommonNodeLabelsManager.EMPTY_NODELABEL_SET, null, null);
+            request.setTokenSequenceNo(tokenSequenceNo);
+            request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
+            request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
+            NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
+            NodeAction nodeAction = response.getNodeAction();
+            if (nodeAction == NodeAction.RESYNC) {
+                registerNodeManager();
+                responseID = 0;
+                tokenSequenceNo = 0;
+                return;
+            }
+            responseID = response.getResponseId();
+            tokenSequenceNo = response.getTokenSequenceNo();
+            List<ContainerId> toBeRemovedFromNM = response.getContainersToBeRemovedFromNM();
+            removeContainer(toBeRemovedFromNM);
+            LOG.debug("response, responseID={}, nmTokenMasterKey={}, tokenSequenceNo={}", responseID, request.getLastKnownNMTokenMasterKey(), response.getTokenSequenceNo());
+        } catch (Exception e) {
+            LOG.warn("Exception ", e);
         }
-        responseID = response.getResponseId();
-        tokenSequenceNo = response.getTokenSequenceNo();
-        List<ContainerId> toBeRemovedFromNM = response.getContainersToBeRemovedFromNM();
-        removeContainer(toBeRemovedFromNM);
-        LOG.debug("response, responseID={}, nmTokenMasterKey={}, tokenSequenceNo={}", responseID, request.getLastKnownNMTokenMasterKey(), response.getTokenSequenceNo());
     }
 
     private void removeContainer(List<ContainerId> toBeRemovedFromNM) {
@@ -185,6 +188,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         for (ContainerId containerId : toBeRemovedFromNM) {
             ApplicationId applicationId = containerId.getApplicationAttemptId().getApplicationId();
             List<Container> containersAll = containers.get(applicationId);
+
             if (containersAll == null) {
                 continue;
             }
@@ -196,6 +200,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                     containerStatusMap.remove(container);
                 }
             }
+            FakeApplication app = applicationMap.get(applicationId);
+//            if (containersAll.isEmpty() && (app != null && app.getAppMaster() != null)) {
             if (containersAll.isEmpty()) {
                 LOG.info("Application {} finished", applicationId);
                 containers.remove(applicationId);
@@ -223,10 +229,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return used;
     }
 
-    public Map<ApplicationId, FakeAppMaster> getAppMasterMap() {
-        return appMasterMap;
-    }
-
     public YarnConfiguration getConfig() {
         return config;
     }
@@ -239,10 +241,18 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return containerStatusMap;
     }
 
+    @SuppressWarnings("WhileLoopReplaceableByForEach")
     private List<ContainerStatus> getContainerStatuses(Map<ApplicationId, List<Container>> containers) {
         List<ContainerStatus> containerStatuses = new ArrayList<>();
         for (List<Container> appContainers : containers.values()) {
-            for (Container container : appContainers) {
+            Iterator<Container> it = appContainers.iterator();
+            while (it.hasNext()) {
+                Container container = it.next();
+                ContainerStatus containerStatus = containerStatusMap.get(container);
+                if (containerStatus == null) {
+                    LOG.warn("ContainerStatus {} is null", container.getId());
+                    continue;
+                }
                 containerStatuses.add(containerStatusMap.get(container));
             }
         }
@@ -281,20 +291,21 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             Credentials credentials = YarnServerSecurityUtils.parseCredentials(request.getContainerLaunchContext());
             ContainerTokenIdentifier tokenIdentifier = BuilderUtils.newContainerTokenIdentifier(request.getContainerToken());
 
-
             ContainerStatus containerStatus = BuilderUtils.newContainerStatus(container.getId(),
                     ContainerState.RUNNING, "running", -1000, container.getResource());
+
             applicationContainers.add(container);
-            FakeAppMaster appMaster = null;
+            FakeApplication fakeApplication = null;
             if (tokenIdentifier.getContainerType().equals(ContainerType.APPLICATION_MASTER)) {
-                appMaster = new FakeAppMaster(applicationId, this, credentials);
-                appMaster.addMasterContainer(container);
-                appMasterMap.put(applicationId, appMaster);
+                fakeApplication = new FakeApplication(applicationId, this, credentials);
+                fakeApplication.addMasterContainer(container);
+                applicationMap.put(applicationId, fakeApplication);
             } else {
-                appMaster = appMasterMap.get(applicationId);
-                appMaster.addContainer(container);
+                fakeApplication = applicationMap.getOrDefault(applicationId, new FakeApplication(applicationId, this, credentials));
+                fakeApplication.addContainer(container);
+                applicationMap.putIfAbsent(applicationId, fakeApplication);
             }
-            containerStatusMap.put(container, containerStatus);
+            containerStatusMap.putIfAbsent(container, containerStatus);
             Resources.subtractFrom(available, tokenId.getResource());
             Resources.addTo(used, tokenId.getResource());
 
@@ -308,11 +319,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     public void updateContainerStatus() throws IOException, YarnException {
-        if (appMasterMap.isEmpty()) {
+        if (applicationMap.isEmpty()) {
             return;
         }
-        for (Map.Entry<ApplicationId, FakeAppMaster> entry : appMasterMap.entrySet()) {
-            FakeAppMaster appMaster = entry.getValue();
+        for (Map.Entry<ApplicationId, FakeApplication> entry : applicationMap.entrySet()) {
+            FakeApplication appMaster = entry.getValue();
             if (appMaster.isRegistered()) {
                 try {
                     appMaster.updateContainer();
@@ -339,13 +350,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             List<Container> applicationContainers = containers.get(applicationId);
             if (applicationContainers == null) {
                 continue;
-            }
-            for (Container c : applicationContainers) {
-                if (c.getId().compareTo(containerID) == 0) {
-                    ContainerStatus containerStatus = containerStatusMap.get(c);
-                    containerStatus.setState(ContainerState.COMPLETE);
-                    containerStatusMap.put(c, containerStatus);
-                }
             }
 
             // Remove container and update status
@@ -376,26 +380,20 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return StopContainersResponse.newInstance(null, null);
     }
 
-    public synchronized void stopApplication(ApplicationId applicationId) {
-        appMasterMap.remove(applicationId);
+    public synchronized void stopContainers(ApplicationId applicationId) {
+        applicationMap.remove(applicationId);
         // Mark the container as COMPLETE
         List<Container> applicationContainers = containers.get(applicationId);
         if (applicationContainers == null) {
             return;
         }
-        for (Container c : applicationContainers) {
-            ContainerStatus containerStatus = containerStatusMap.get(c);
-            containerStatus.setState(ContainerState.COMPLETE);
-            containerStatusMap.put(c, containerStatus);
 
-        }
-
-        Container container = null;
-        for (Iterator<Container> i = applicationContainers.iterator(); i
-                .hasNext(); ) {
-            container = i.next();
+        for (Container container : applicationContainers) {
             ContainerStatus containerStatus = containerStatusMap.get(container);
-            containerStatus.setDiagnostics("app finished");
+            if (containerStatus.getState() == ContainerState.COMPLETE) {
+                continue;
+            }
+            containerStatus.setDiagnostics("app finished\n");
             containerStatus.setExitStatus(0);
             containerStatus.setState(ContainerState.COMPLETE);
             Resources.addTo(available, container.getResource());

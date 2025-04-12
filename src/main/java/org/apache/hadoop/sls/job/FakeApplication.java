@@ -23,9 +23,11 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class FakeAppMaster {
+import static org.apache.hadoop.sls.nm.NodeManagerCommon.FAKE_NODE_MANAGER_MAP;
 
-    private static final Logger LOG = LoggerFactory.getLogger(FakeAppMaster.class);
+public class FakeApplication {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FakeApplication.class);
 
     private final ApplicationId applicationId;
 
@@ -51,7 +53,9 @@ public class FakeAppMaster {
 
     private Container appMaster = null;
 
-    public FakeAppMaster(ApplicationId applicationId, YarnFakeNodeManager nodeManager, Credentials credentials) {
+    private int allocatedCount = 0;
+
+    public FakeApplication(ApplicationId applicationId, YarnFakeNodeManager nodeManager, Credentials credentials) {
         this.applicationId = applicationId;
         appStartTime = System.currentTimeMillis();
         this.nodeManager = nodeManager;
@@ -65,7 +69,7 @@ public class FakeAppMaster {
             currentUser.addCredentials(credentials);
             appMasterClient = AMRMClientUtils.createRMProxy(nodeManager.getConfig(), ApplicationMasterProtocol.class, currentUser, amrmToken);
         } catch (IOException e) {
-            LOG.info("init faiked", e);
+            LOG.warn("init faiked", e);
         }
     }
 
@@ -83,25 +87,31 @@ public class FakeAppMaster {
 
     public synchronized void addMasterContainer(Container container) {
         containers.put(container, System.currentTimeMillis());
-        if (appMaster != null) {
+        if (appMaster == null) {
             appMaster = container;
         }
-        containerCount++;
     }
 
     public synchronized void addContainer(Container container) {
         containers.put(container, System.currentTimeMillis());
-        containerCount++;
     }
 
     public boolean isRegistered() {
-        return isRegistered;
+        return appMaster == null || isRegistered;
+    }
+
+    public Container getAppMaster() {
+        return appMaster;
     }
 
     public void registerToRm() throws IOException, YarnException {
+        if (appMaster == null) {
+            return;
+        }
         RegisterApplicationMasterRequest request = RegisterApplicationMasterRequest.newInstance(nodeManager.getNodeId().getHost(), nodeManager.getNodeId().getPort(), "");
         appMasterClient.registerApplicationMaster(request);
         isRegistered = true;
+        LOG.info("AM {} register success", appMaster.getId());
     }
 
     public void updateContainer() throws IOException, YarnException {
@@ -111,7 +121,7 @@ public class FakeAppMaster {
         }
 
         checkFinished();
-        if (containerCount <= slsConfig.getJobContainerNums()) {
+        if (allocatedCount < slsConfig.getJobContainerNums() && appMaster != null) {
             // 申请allocation
             allocateContainer();
             return;
@@ -120,10 +130,17 @@ public class FakeAppMaster {
         if (currentTime - appStartTime < slsConfig.getJobDuration()) {
             return;
         }
-        nodeManager.stopApplication(applicationId);
+
+        if (appMaster == null || !isRegistered) {
+            nodeManager.stopContainers(applicationId);
+            return;
+        }
+
         FinishApplicationMasterRequest request = FinishApplicationMasterRequest.newInstance(FinalApplicationStatus.SUCCEEDED, "run success", "");
         try {
+            nodeManager.stopContainers(applicationId);
             appMasterClient.finishApplicationMaster(request);
+            LOG.info("app {} finished", appMaster.getId().getApplicationAttemptId().getApplicationId());
         } catch (InvalidApplicationMasterRequestException e) {
             LOG.debug("ignore error {}", e.getMessage());
         }
@@ -131,7 +148,7 @@ public class FakeAppMaster {
 
     private void checkFinished() {
         long currentTime = System.currentTimeMillis();
-        for (Map.Entry<Container, Long> entry: containers.entrySet()) {
+        for (Map.Entry<Container, Long> entry : containers.entrySet()) {
             Long time = entry.getValue();
             Container container = entry.getKey();
             if (currentTime - time < slsConfig.getJobDuration()) {
@@ -169,14 +186,18 @@ public class FakeAppMaster {
             return;
         }
         LOG.debug("allocated container {} ", Arrays.toString(allocatedContainers.toArray()));
-        List<StartContainerRequest> requests = new ArrayList<>();
-        for (Container container: allocatedContainers) {
+        for (Container container : allocatedContainers) {
+            List<StartContainerRequest> requests = new ArrayList<>();
             ContainerLaunchContext launchContext = setupContainerLaunchContext();
             StartContainerRequest startContainerRequest = StartContainerRequest.newInstance(launchContext, container.getContainerToken());
             requests.add(startContainerRequest);
+            StartContainersRequest startContainersRequest = StartContainersRequest.newInstance(requests);
+            YarnFakeNodeManager realNodeManager = FAKE_NODE_MANAGER_MAP.get(container.getNodeId());
+            if (realNodeManager != null) {
+                realNodeManager.startContainers(startContainersRequest);
+            }
         }
-        StartContainersRequest startContainersRequest = StartContainersRequest.newInstance(requests);
-        nodeManager.startContainers(startContainersRequest);
+        allocatedCount += allocatedContainers.size();
     }
 
     private ContainerLaunchContext setupContainerLaunchContext() throws IOException {
@@ -196,9 +217,13 @@ public class FakeAppMaster {
     }
 
     public void failedApp(String msg) throws IOException, YarnException {
-        nodeManager.stopApplication(applicationId);
+        if (appMaster == null) {
+            nodeManager.stopContainers(applicationId);
+            return;
+        }
         FinishApplicationMasterRequest request = FinishApplicationMasterRequest.newInstance(FinalApplicationStatus.FAILED, msg, "");
         try {
+            nodeManager.stopContainers(applicationId);
             appMasterClient.finishApplicationMaster(request);
         } catch (InvalidApplicationMasterRequestException e) {
             LOG.debug("ignore error {}", e.getMessage());

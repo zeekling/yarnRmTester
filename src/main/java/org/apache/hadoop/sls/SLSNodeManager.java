@@ -1,6 +1,7 @@
 package org.apache.hadoop.sls;
 
 import org.apache.hadoop.sls.config.SLSConfig;
+import org.apache.hadoop.sls.job.FakeApplication;
 import org.apache.hadoop.sls.nm.JobStatUpdater;
 import org.apache.hadoop.sls.nm.YarnFakeNodeManager;
 import org.apache.hadoop.sls.util.CommonUtils;
@@ -18,6 +19,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+
+import static org.apache.hadoop.sls.nm.NodeManagerCommon.FAKE_NODE_MANAGER_MAP;
 
 public class SLSNodeManager {
 
@@ -37,15 +40,15 @@ public class SLSNodeManager {
         int vcore = Integer.parseInt(config.get(YarnConfiguration.NM_VCORES));
         Resource capacity = Resource.newInstance(memory, vcore);
         executor = Executors.newFixedThreadPool(slsConfig.getThreadPoolSize());
-        List<YarnFakeNodeManager> fakeNodeManagers = new ArrayList<>();
-        initFakeNM(slsConfig, capacity, config, fakeNodeManagers);
-        LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagers.size());
-        JobStatUpdater updater = new JobStatUpdater(slsConfig, fakeNodeManagers, config);
+        Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap = FAKE_NODE_MANAGER_MAP;
+        initFakeNM(slsConfig, capacity, config, fakeNodeManagerMap);
+        LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagerMap.size());
+        JobStatUpdater updater = new JobStatUpdater(slsConfig, fakeNodeManagerMap, config);
         updater.updateAsync();
-        beginHeartBeat(fakeNodeManagers, executor);
+        beginHeartBeat(fakeNodeManagerMap, executor);
     }
 
-    private static void initFakeNM(SLSConfig slsConfig, Resource capacity, YarnConfiguration config, List<YarnFakeNodeManager> fakeNodeManagers) {
+    private static void initFakeNM(SLSConfig slsConfig, Resource capacity, YarnConfiguration config, Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap) {
         List<Future<?>> futures = new ArrayList<>(slsConfig.getFakeNMCount());
         for (int i = 0; i < slsConfig.getFakeNMCount(); i++) {
             int finalI = i;
@@ -55,7 +58,7 @@ public class SLSNodeManager {
                     fakeNodeManager = new YarnFakeNodeManager(slsConfig.getHostName(),
                             slsConfig.getRpcBeginPort() + finalI, slsConfig.getHttpBeginPort() + finalI,
                             slsConfig.getSlsNmRack(), capacity, config, slsConfig);
-                    fakeNodeManagers.add(fakeNodeManager);
+                    fakeNodeManagerMap.put(fakeNodeManager.getNodeId(), fakeNodeManager);
                 } catch (IOException | YarnException e) {
                     LOG.warn("failed to init NodeManager", e);
                 }
@@ -66,10 +69,11 @@ public class SLSNodeManager {
         CommonUtils.waitFutures(futures);
     }
 
-    private static void beginHeartBeat(List<YarnFakeNodeManager> fakeNodeManagers, ExecutorService executor) {
-        Map<NodeId, Future<?>> futureMap = new HashMap<>(fakeNodeManagers.size());
+    private static void beginHeartBeat(Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap, ExecutorService executor) {
+        Map<NodeId, Future<?>> futureMap = new HashMap<>(fakeNodeManagerMap.size());
         while (true) {
-            for (YarnFakeNodeManager fakeNodeManager: fakeNodeManagers) {
+            for (Map.Entry<NodeId, YarnFakeNodeManager> entry : FAKE_NODE_MANAGER_MAP.entrySet()) {
+                YarnFakeNodeManager fakeNodeManager = entry.getValue();
                 Future<?> future = futureMap.get(fakeNodeManager.getNodeId());
                 boolean needHeartBeat = true;
                 if (future != null) {
