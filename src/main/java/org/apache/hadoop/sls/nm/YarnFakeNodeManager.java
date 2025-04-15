@@ -202,6 +202,16 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 Container container = it.next();
                 if (containerId.equals(container.getId())) {
                     it.remove();
+                    ContainerStatus containerStatus = containerStatusMap.get(container);
+                    if (containerStatus.getState() != ContainerState.COMPLETE) {
+                        containerStatus.setDiagnostics("stoped");
+                        containerStatus.setExitStatus(0);
+                        Resources.addTo(available, container.getResource());
+                        Resources.subtractFrom(used, container.getResource());
+                        LOG.debug("stopContainer: node={} application={} container={}"
+                                        + " available={} used={}", containerManagerAddress, applicationId,
+                                container.getId(), available, used);
+                    }
                     containerStatusMap.remove(container);
                 }
             }
