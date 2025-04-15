@@ -84,6 +84,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final int httpPort;
 
+    private final NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
+
     public YarnFakeNodeManager(String hostName, int containerManagerPort, int httpPort,
                                String rackName, Resource capability, YarnConfiguration config, SLSConfig slsConfig) throws IOException, YarnException {
         this.containerManagerAddress = hostName + ":" + containerManagerPort;
@@ -130,7 +132,6 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     private void initRpcServer(YarnConfiguration config, int port, String hostName) {
         YarnRPC rpc = YarnRPC.create(config);
         InetSocketAddress addr = NetUtils.createSocketAddr(hostName + ":" + port);
-        NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
         tokenSecretManager.setMasterKey(nmTokenMasterKey);
         Server server = rpc.getServer(ContainerManagementProtocol.class,
                 this, addr, config, tokenSecretManager, 10);
@@ -170,6 +171,10 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 responseID = 0;
                 tokenSequenceNo = 0;
                 return;
+            }
+            if (response.getNMTokenMasterKey() != null) {
+                nmTokenMasterKey = response.getNMTokenMasterKey();
+                tokenSecretManager.setMasterKey(response.getNMTokenMasterKey());
             }
             responseID = response.getResponseId();
             tokenSequenceNo = response.getTokenSequenceNo();
