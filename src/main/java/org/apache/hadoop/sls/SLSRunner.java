@@ -37,7 +37,7 @@ public class SLSRunner {
         List<Future<?>> futures = new ArrayList<>();
         while (count <= slsConfig.getJobCycleTimes()) {
             int finalCount = count;
-            for (int i=0; i < 2; i++) {
+            for (int i=0; i < 40; i++) {
                 int finalI = i;
                 Runnable runnable = () -> {
                     try {
