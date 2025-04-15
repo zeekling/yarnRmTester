@@ -201,9 +201,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 }
             }
             FakeApplication app = applicationMap.get(applicationId);
-//            if (containersAll.isEmpty() && (app != null && app.getAppMaster() != null)) {
             if (containersAll.isEmpty()) {
-                LOG.info("Application {} finished", applicationId);
                 containers.remove(applicationId);
             }
         }
@@ -359,9 +357,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
                 container = applicationContainer;
                 if (container.getId().compareTo(containerID) == 0) {
                     ContainerStatus containerStatus = containerStatusMap.get(container);
+                    if (containerStatus.getState() == ContainerState.COMPLETE) {
+                        continue;
+                    }
                     containerStatus.setDiagnostics("stoped");
                     containerStatus.setExitStatus(0);
-                    containerStatus.setState(ContainerState.COMPLETE);
                     ++ctr;
                 }
             }
