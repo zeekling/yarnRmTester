@@ -6,9 +6,14 @@ import org.apache.hadoop.sls.nm.JobStatUpdater;
 import org.apache.hadoop.sls.nm.YarnFakeNodeManager;
 import org.apache.hadoop.sls.util.CommonUtils;
 import org.apache.hadoop.yarn.api.records.NodeId;
+import org.apache.hadoop.yarn.api.records.NodeLabel;
 import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.client.ClientRMProxy;
+import org.apache.hadoop.yarn.client.util.YarnClientUtils;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
+import org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocol;
+import org.apache.hadoop.yarn.server.api.protocolrecords.AddToClusterNodeLabelsRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +53,9 @@ public class SLSNodeManager {
         beginHeartBeat(fakeNodeManagerMap, executor);
     }
 
-    private static void initFakeNM(SLSConfig slsConfig, Resource capacity, YarnConfiguration config, Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap) {
+
+    private static void initFakeNM(SLSConfig slsConfig, Resource capacity, YarnConfiguration config, Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap) throws IOException, YarnException {
+        ResourceManagerAdministrationProtocol rmAdmin = ClientRMProxy.createRMProxy(config, ResourceManagerAdministrationProtocol.class);
         List<Future<?>> futures = new ArrayList<>(slsConfig.getFakeNMCount());
         for (int i = 0; i < slsConfig.getFakeNMCount(); i++) {
             int finalI = i;

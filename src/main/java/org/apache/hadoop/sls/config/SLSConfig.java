@@ -32,17 +32,11 @@ public class SLSConfig {
 
     private static final String SLS_JOB_QUEUE = "yarn.fake.job.queue";
 
-    public static final String SLS_NODE_LABEL = "fake_test";
-
     private static final String SLS_JOB_UPDATE_THREAD_POOL_SIZE = "yarn.fake.job.update.threadpool.size";
 
     private static final String SLS_JOB_DURATION = "yarn.fake.job.duration";
 
     private static final String SLS_JOB_CONTAINER_NUM = "yarn.fake.job.container.nums";
-
-    public static final Set<NodeLabel> NODE_LABEL_SET = new HashSet<NodeLabel>(1) {{
-        add(NodeLabel.newInstance(SLSConfig.SLS_NODE_LABEL));
-    }};
 
     private final Properties properties = new Properties();
 

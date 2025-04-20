@@ -20,10 +20,7 @@ import org.apache.hadoop.yarn.security.ContainerTokenIdentifier;
 import org.apache.hadoop.yarn.server.api.ContainerType;
 import org.apache.hadoop.yarn.server.api.ResourceTracker;
 import org.apache.hadoop.yarn.server.api.ServerRMProxy;
-import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatRequest;
-import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatResponse;
-import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerRequest;
-import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResponse;
+import org.apache.hadoop.yarn.server.api.protocolrecords.*;
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
 import org.apache.hadoop.yarn.server.api.records.NodeAction;
 import org.apache.hadoop.yarn.server.api.records.NodeHealthStatus;
@@ -310,11 +307,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             applicationContainers.add(container);
             FakeApplication fakeApplication = null;
             if (tokenIdentifier.getContainerType().equals(ContainerType.APPLICATION_MASTER)) {
-                fakeApplication = new FakeApplication(applicationId, this, credentials);
+                fakeApplication = new FakeApplication(applicationId, this, credentials, config);
                 fakeApplication.addMasterContainer(container);
                 applicationMap.put(applicationId, fakeApplication);
             } else {
-                fakeApplication = applicationMap.getOrDefault(applicationId, new FakeApplication(applicationId, this, credentials));
+                fakeApplication = applicationMap.getOrDefault(applicationId, new FakeApplication(applicationId, this, credentials, config));
                 fakeApplication.addContainer(container);
                 applicationMap.putIfAbsent(applicationId, fakeApplication);
             }
