@@ -61,7 +61,7 @@ public class FakeApplication {
 
     private int allocatedCount = 0;
 
-    private YarnConfiguration config;
+    private final YarnConfiguration config;
 
     private Map<NodeId, ContainerManagementProtocol> nodeManagerConnections = new HashMap<>();
 
@@ -115,11 +115,20 @@ public class FakeApplication {
         return appMaster;
     }
 
+    public int getAllocatedCount() {
+        return allocatedCount;
+    }
+
+    public long getAppStartTime() {
+        return appStartTime;
+    }
+
     public void registerToRm() throws IOException, YarnException {
         if (appMaster == null) {
             return;
         }
-        RegisterApplicationMasterRequest request = RegisterApplicationMasterRequest.newInstance(nodeManager.getNodeId().getHost(), nodeManager.getNodeId().getPort(), "");
+        String appHttpAddress = appMaster.getNodeHttpAddress() + "/" + appMaster.getId() + "?nodeId=" + appMaster.getNodeId();
+        RegisterApplicationMasterRequest request = RegisterApplicationMasterRequest.newInstance(nodeManager.getNodeId().getHost(), nodeManager.getNodeId().getPort(), appHttpAddress);
         appMasterClient.registerApplicationMaster(request);
         isRegistered = true;
         LOG.info("AM {} register success", appMaster.getId());

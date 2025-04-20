@@ -247,6 +247,14 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         return slsConfig;
     }
 
+    public Map<ApplicationId, FakeApplication> getApplicationMap() {
+        return applicationMap;
+    }
+
+    public Map<ApplicationId, List<Container>> getContainers() {
+        return containers;
+    }
+
     public Map<Container, ContainerStatus> getContainerStatusMap() {
         return containerStatusMap;
     }
