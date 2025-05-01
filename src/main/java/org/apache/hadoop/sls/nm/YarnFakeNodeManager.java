@@ -37,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -83,8 +84,9 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
 
-    public YarnFakeNodeManager(String hostName, int containerManagerPort, int httpPort,
+    public YarnFakeNodeManager(int containerManagerPort, int httpPort,
                                String rackName, Resource capability, YarnConfiguration config, SLSConfig slsConfig) throws IOException, YarnException {
+        String hostName = InetAddress.getLocalHost().getHostName();
         this.containerManagerAddress = hostName + ":" + containerManagerPort;
         this.nodeHttpAddress = hostName + ":" + httpPort;
         this.rackName = rackName;

@@ -11,9 +11,6 @@ import java.util.Properties;
 import java.util.Set;
 
 public class SLSConfig {
-
-    private static final String SLS_NM_HOSTNAME = "yarn.fake.nodemanager.hostname";
-
     private static final String SLS_NM_RACK = "yarn.fake.nodemanager.rack";
 
     private static final String SLS_NM_COUNT = "yarn.fake.nodemanger.count";
@@ -42,10 +39,6 @@ public class SLSConfig {
 
     public SLSConfig(String path) throws IOException {
         properties.load(FileUtils.openInputStream(FileUtils.getFile(path)));
-    }
-
-    public String getHostName() {
-        return properties.getProperty(SLS_NM_HOSTNAME);
     }
 
     public String getSlsNmRack() {

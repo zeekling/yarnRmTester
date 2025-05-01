@@ -34,7 +34,7 @@ public class SLSNodeManager {
     private static ExecutorService executor = null;
 
     public static void main(String[] args) throws IOException, YarnException {
-        String configPath = "/home/zeekling/project/gitea/yarnRmTester/src/main/resources";
+        String configPath = "D:\\project\\gitea\\yarnRmTester\\src\\main\\resources";
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
         config.addResource(configPath + File.separator + "core-site.xml");
@@ -62,7 +62,7 @@ public class SLSNodeManager {
             Runnable runnable = () -> {
                 YarnFakeNodeManager fakeNodeManager = null;
                 try {
-                    fakeNodeManager = new YarnFakeNodeManager(slsConfig.getHostName(),
+                    fakeNodeManager = new YarnFakeNodeManager(
                             slsConfig.getRpcBeginPort() + finalI, slsConfig.getHttpBeginPort() + finalI,
                             slsConfig.getSlsNmRack(), capacity, config, slsConfig);
                     fakeNodeManagerMap.put(fakeNodeManager.getNodeId(), fakeNodeManager);

@@ -24,7 +24,7 @@ public class SLSRunner {
     private static ExecutorService jobSubmitPool = null;
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        String configPath = "/home/zeekling/project/gitea/yarnRmTester/src/main/resources";
+        String configPath = "D:\\project\\gitea\\yarnRmTester\\src\\main\\resources";
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
         config.addResource(configPath + File.separator + "core-site.xml");
@@ -37,7 +37,7 @@ public class SLSRunner {
         List<Future<?>> futures = new ArrayList<>();
         while (count <= slsConfig.getJobCycleTimes()) {
             int finalCount = count;
-            for (int i=0; i < 20; i++) {
+            for (int i=0; i < 100; i++) {
                 int finalI = i;
                 Runnable runnable = () -> {
                     try {
