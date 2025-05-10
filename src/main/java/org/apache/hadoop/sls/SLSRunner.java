@@ -21,8 +21,6 @@ public class SLSRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(SLSRunner.class);
 
-    private static ExecutorService jobSubmitPool = null;
-
     public static void main(String[] args) throws IOException, InterruptedException {
         String configPath = "D:\\project\\gitea\\yarnRmTester\\src\\main\\resources";
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
@@ -30,7 +28,7 @@ public class SLSRunner {
         config.addResource(configPath + File.separator + "core-site.xml");
         config.addResource(configPath + File.separator + "hdfs-site.xml");
         config.addResource(configPath + File.separator + "yarn-site.xml");
-        jobSubmitPool = Executors.newFixedThreadPool(slsConfig.getJobParallel());
+        ExecutorService jobSubmitPool = Executors.newFixedThreadPool(slsConfig.getJobParallel());
         UserGroupInformation currentUser = UserGroupInformation.getCurrentUser();
         LOG.info("currentUser={} {}", currentUser, currentUser.getTokens());
         int count = 0;
