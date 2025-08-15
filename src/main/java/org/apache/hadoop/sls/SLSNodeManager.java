@@ -35,6 +35,9 @@ public class SLSNodeManager {
 
     public static void main(String[] args) throws IOException, YarnException {
         String configPath = "D:\\project\\gitea\\yarnRmTester\\src\\main\\resources";
+        if (args.length != 0) {
+            configPath = args[0];
+        }
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
         config.addResource(configPath + File.separator + "core-site.xml");

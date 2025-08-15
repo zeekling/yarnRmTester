@@ -1,4 +1,3 @@
-yarn.fake.nodelabel=fake_01
 yarn.fake.nodemanager.rack=	/default-rack
 yarn.fake.nodemanger.rpc.port.begin=12000
 yarn.fake.nodemanger.http.port.begin=22000
