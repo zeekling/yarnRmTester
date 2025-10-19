@@ -46,7 +46,10 @@ Hadoop自带的hadoop-sls只能用于压测调度器，可在实际中影响Reso
   - yarn.fake.job.container.memory-mb： 普通Container占用的内存大小。
   - yarn.fake.job.update.threadpool.size：作业状态更新的线程数目。
 
-接下来就直接运行SLSNodeManager即可。
+接下来就直接运行SLSNodeManager即可。例如：
+```bash
+java -cp .:lib/*:config/* org.apache.hadoop.sls.SLSNodeManager /home/hadoop01/fakeNM/config/
+```
 
 ## SLSRunner
 
@@ -64,6 +67,9 @@ Hadoop自带的hadoop-sls只能用于压测调度器，可在实际中影响Reso
    - yarn.fake.job.cycle.times： 循环次数。
    yarn.fake.job.queue： 作业提交的队列。
 
-接下来就直接运行SLSRunner即可。
+接下来就直接运行SLSRunner即可。例如：
+```bash
+java -cp .:lib/* org.apache.hadoop.sls.SLSRunner /home/hadoop01/fakeNM/config/
+```
 
 
