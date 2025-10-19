@@ -1,5 +1,6 @@
 package org.apache.hadoop.sls;
 
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeJob;
@@ -28,9 +29,9 @@ public class SLSRunner {
         }
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
-        config.addResource(configPath + File.separator + "core-site.xml");
-        config.addResource(configPath + File.separator + "hdfs-site.xml");
-        config.addResource(configPath + File.separator + "yarn-site.xml");
+        config.addResource(new Path(configPath + File.separator + "core-site.xml"));
+        config.addResource(new Path(configPath + File.separator + "hdfs-site.xml"));
+        config.addResource(new Path(configPath + File.separator + "yarn-site.xml"));
         ExecutorService jobSubmitPool = Executors.newFixedThreadPool(slsConfig.getJobParallel());
         UserGroupInformation currentUser = UserGroupInformation.getCurrentUser();
         LOG.info("currentUser={} {}", currentUser, currentUser.getTokens());

@@ -1,5 +1,6 @@
 package org.apache.hadoop.sls;
 
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeApplication;
 import org.apache.hadoop.sls.nm.JobStatUpdater;
@@ -40,15 +41,16 @@ public class SLSNodeManager {
         }
         SLSConfig slsConfig = new SLSConfig(configPath + File.separator + "fake.properites");
         YarnConfiguration config = new YarnConfiguration();
-        config.addResource(configPath + File.separator + "core-site.xml");
-        config.addResource(configPath + File.separator + "hdfs-site.xml");
-        config.addResource(configPath + File.separator + "yarn-site.xml");
+        config.addResource(new Path(configPath + File.separator + "core-site.xml"));
+        config.addResource(new Path(configPath + File.separator + "hdfs-site.xml"));
+        config.addResource(new Path(configPath + File.separator + "yarn-site.xml"));
 
         long memory = Long.parseLong(config.get(YarnConfiguration.NM_PMEM_MB));
         int vcore = Integer.parseInt(config.get(YarnConfiguration.NM_VCORES));
         Resource capacity = Resource.newInstance(memory, vcore);
         executor = Executors.newFixedThreadPool(slsConfig.getThreadPoolSize());
         Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap = FAKE_NODE_MANAGER_MAP;
+        LOG.info("Fake container capacity: {}", slsConfig.getJobContainerResource());
         initFakeNM(slsConfig, capacity, config, fakeNodeManagerMap);
         LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagerMap.size());
         JobStatUpdater updater = new JobStatUpdater(slsConfig, fakeNodeManagerMap, config);
