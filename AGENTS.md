@@ -104,11 +104,11 @@ import org.slf4j.Logger;
 - 编译主程序：mvn compile
 - 打包并执行 Fake NM：
   ```bash
-  java -cp target/lib/*:target/classes org.apache.hadoop.sls.SLSNodeManager /path/to/config/
+  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSNodeManager /path/to/config/
   ```
 - 运行压力测试：
   ```bash
-  java -cp target/lib/*:target/classes org.apache.hadoop.sls.SLSRunner /path/to/config/
+  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSRunner /path/to/config/
   ```
 - 配置文件路径：src/main/resources 下的 fake.properites、core-site.xml、hdfs-site.xml、yarn-site.xml
 
@@ -150,3 +150,23 @@ RM/NM 压力仿真场景（扩展）
  - 指标与观测：提交吞吐、平均/最大延迟、心跳延迟、丢失率、资源利用率、成功/失败比例、节点恢复时间、日志中的关键事件计数；
  - 实现方式与扩展：可在 SLSRunner/SLSNodeManager 的入口添加压力测试入口函数 PressureTestMain，支持 -DpressureMode、-Diterations、-Dconcurrency 等参数；
  - 运行注意：在仿真环境中执行，完成后清理数据与状态，确保可重复性；
+
+代码结构说明
+- 核心组件：
+  * SLSRunner: 主要用于提交FakeJob，模拟客户端行为
+  * SLSNodeManager: 模拟多个NodeManager节点，管理YarnFakeNodeManager实例
+  * YarnFakeNodeManager: 实现ContainerManagementProtocol接口，模拟NodeManager行为
+  * FakeJob: 模拟ApplicationMaster，负责提交应用和管理容器
+  * FakeApplication: 管理应用级别的容器操作
+  * SLSConfig: 配置管理类，读取fake.properties配置文件
+  * CommonUtils: 工具类，提供Future等待等通用功能
+  * MetricsServer: 指标收集服务，提供HTTP接口暴露监控数据
+  * HeartbeatResponseCollector: 心跳响应收集器，用于收集和分析RM的心跳响应
+
+- 重要类和方法：
+  * SLSRunner.main(): 压力测试入口，负责初始化配置和提交FakeJob
+  * SLSNodeManager.main(): Fake NM入口，初始化多个YarnFakeNodeManager实例
+  * YarnFakeNodeManager.heartbeat(): 模拟NodeManager心跳，与ResourceManager通信
+  * YarnFakeNodeManager.startContainers(): 处理容器启动请求
+  * FakeJob.submit(): 提交Fake应用到ResourceManager
+  * SLSConfig: 提供所有配置项的访问方法
