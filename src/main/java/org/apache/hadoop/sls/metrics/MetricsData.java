@@ -5,10 +5,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class MetricsData {
     private final AtomicLong totalContainersAllocated = new AtomicLong(0);
     private final AtomicLong totalContainersReleased = new AtomicLong(0);
-    private final AtomicLong totalHeartbeats = new AtomicLong(0);
     private final AtomicLong successfulHeartbeats = new AtomicLong(0);
     private final AtomicLong failedHeartbeats = new AtomicLong(0);
-    private final long lastHeartbeatTime;
+    private long lastHeartbeatTime;
     private volatile long lastCollectTime;
 
     public MetricsData() {
@@ -24,21 +23,16 @@ public class MetricsData {
         totalContainersReleased.incrementAndGet();
     }
 
-    public void incrementHeartbeats() {
-        totalHeartbeats.incrementAndGet();
-    }
-
     public void incrementSuccessfulHeartbeats() {
-        totalHeartbeats.incrementAndGet();
         successfulHeartbeats.incrementAndGet();
     }
 
     public void incrementFailedHeartbeats() {
-        totalHeartbeats.incrementAndGet();
         failedHeartbeats.incrementAndGet();
     }
 
     public void updateLastHeartbeatTime() {
+        this.lastHeartbeatTime = System.nanoTime();
     }
 
     public long getTotalContainersAllocated() {
@@ -47,10 +41,6 @@ public class MetricsData {
 
     public long getTotalContainersReleased() {
         return totalContainersReleased.get();
-    }
-
-    public long getTotalHeartbeats() {
-        return totalHeartbeats.get();
     }
 
     public long getSuccessfulHeartbeats() {

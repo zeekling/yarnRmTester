@@ -7,7 +7,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ResourceManagerMetricsCollector {
     private static final Logger LOG = LoggerFactory.getLogger(ResourceManagerMetricsCollector.class);
@@ -70,5 +72,14 @@ public class ResourceManagerMetricsCollector {
 
     public long getLastCollectTime() {
         return lastCollectTime;
+    }
+
+    public Map<String, Object> collectMetricsToMap() {
+        Map<String, Object> metrics = new HashMap<>();
+        metrics.put("activeApplications", activeApplications);
+        metrics.put("completedApplications", completedApplications);
+        metrics.put("failedApplications", failedApplications);
+        metrics.put("lastCollectTime", lastCollectTime);
+        return metrics;
     }
 }

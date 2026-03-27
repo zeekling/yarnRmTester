@@ -20,12 +20,15 @@ public class MetricsHttpHandler implements HttpHandler {
 
     private final Map<String, HeartbeatResponseCollector> heartbeatCollectors;
     private final ResourceManagerMetricsCollector rmMetricsCollector;
+    private final MetricsServer metricsServer;
     private final ObjectMapper objectMapper;
 
     public MetricsHttpHandler(Map<String, HeartbeatResponseCollector> heartbeatCollectors,
-                             ResourceManagerMetricsCollector rmMetricsCollector) {
+                             ResourceManagerMetricsCollector rmMetricsCollector,
+                             MetricsServer metricsServer) {
         this.heartbeatCollectors = heartbeatCollectors;
         this.rmMetricsCollector = rmMetricsCollector;
+        this.metricsServer = metricsServer;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -47,21 +50,18 @@ public class MetricsHttpHandler implements HttpHandler {
         
         Map<String, Object> metricsMap = new HashMap<>();
 
-        long totalHeartbeats = 0;
         long totalContainersAllocated = 0;
         long totalContainersReleased = 0;
         int totalNodes = heartbeatCollectors.size();
 
         for (HeartbeatResponseCollector collector : heartbeatCollectors.values()) {
             MetricsData data = collector.getMetricsData();
-            totalHeartbeats += data.getTotalHeartbeats();
             totalContainersAllocated += data.getTotalContainersAllocated();
             totalContainersReleased += data.getTotalContainersReleased();
         }
 
         metricsMap.put("cluster", Map.of(
-            "totalNodes", totalNodes,
-            "totalHeartbeats", totalHeartbeats
+            "totalNodes", totalNodes
         ));
         metricsMap.put("scheduling", Map.of(
             "totalContainersAllocated", totalContainersAllocated,
@@ -73,6 +73,7 @@ public class MetricsHttpHandler implements HttpHandler {
             "failed", rmMetricsCollector.getFailedApplications()
         ));
         metricsMap.put("timestamp", System.currentTimeMillis());
+        metricsMap.put("nodeHeartbeatMetrics", getNodeHeartbeatMetrics());
 
         String jsonResponse;
         try {
@@ -84,6 +85,50 @@ public class MetricsHttpHandler implements HttpHandler {
         }
 
         sendResponse(exchange, jsonResponse, 200, "application/json");
+    }
+
+    /**
+     * 获取节点心跳统计信息的映射表
+     *
+     * @return 包含所有节点心跳统计信息的映射表，键为节点ID，值为NodeHeartbeatStats对象
+     */
+    public Map<String, NodeHeartbeatStats> getNodeHeartbeatStatsMap() {
+        return metricsServer.getNodeHeartbeatStatsMap();
+    }
+
+    /**
+     * 获取所有节点的详细心跳指标
+     *
+     * @return 包含所有节点心跳指标的映射表，键为节点ID，值为该节点的心跳指标
+     *         指标包括：totalHeartbeats（总心跳次数）、successfulHeartbeats（成功心跳次数），
+     *         failedHeartbeats（失败心跳次数）、heartbeatCount（记录的心跳次数）、
+     *         totalHeartbeatDuration（总心跳持续时间）、maxHeartbeatDuration（最大心跳持续时间）
+     *         和 avgHeartbeatDuration（平均心跳持续时间）
+     */
+    public Map<String, Map<String, Object>> getNodeHeartbeatMetrics() {
+        Map<String, Map<String, Object>> nodeMetrics = new HashMap<>();
+        for (Map.Entry<String, HeartbeatResponseCollector> entry : heartbeatCollectors.entrySet()) {
+            String nodeId = entry.getKey();
+            HeartbeatResponseCollector collector = entry.getValue();
+            MetricsData metricsData = collector.getMetricsData();
+
+            Map<String, Object> nodeData = new HashMap<>();
+            nodeData.put("totalHeartbeats", metricsData.getTotalContainersAllocated() + metricsData.getTotalContainersReleased());
+            nodeData.put("successfulHeartbeats", metricsData.getSuccessfulHeartbeats());
+            nodeData.put("failedHeartbeats", metricsData.getFailedHeartbeats());
+
+            Map<String, NodeHeartbeatStats> nodeStatsMap = getNodeHeartbeatStatsMap();
+            if (nodeStatsMap.containsKey(nodeId)) {
+                NodeHeartbeatStats stats = nodeStatsMap.get(nodeId);
+                nodeData.put("heartbeatCount", stats.getHeartbeatCount());
+                nodeData.put("totalHeartbeatDuration", stats.getTotalHeartbeatDuration());
+                nodeData.put("maxHeartbeatDuration", stats.getMaxHeartbeatDuration());
+                nodeData.put("avgHeartbeatDuration", stats.getAverageHeartbeatDuration());
+            }
+
+            nodeMetrics.put(nodeId, nodeData);
+        }
+        return nodeMetrics;
     }
 
     private void handleNotFound(HttpExchange exchange) throws IOException {

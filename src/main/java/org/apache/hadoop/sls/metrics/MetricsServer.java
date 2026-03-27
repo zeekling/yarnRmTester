@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 public class MetricsServer {
@@ -19,6 +20,7 @@ public class MetricsServer {
     private final HttpServer httpServer;
     private final Map<String, HeartbeatResponseCollector> heartbeatCollectors;
     private final ResourceManagerMetricsCollector rmMetricsCollector;
+    private final Map<String, NodeHeartbeatStats> nodeHeartbeatStatsMap = new ConcurrentHashMap<>();
 
     public MetricsServer(int port, YarnClient yarnClient) throws IOException {
         this.port = port;
@@ -28,7 +30,7 @@ public class MetricsServer {
         InetSocketAddress addr = new InetSocketAddress(port);
         this.httpServer = HttpServer.create(addr, 0);
 
-        MetricsHttpHandler handler = new MetricsHttpHandler(heartbeatCollectors, rmMetricsCollector);
+        MetricsHttpHandler handler = new MetricsHttpHandler(heartbeatCollectors, rmMetricsCollector, this);
         httpServer.createContext("/metrics", handler);
         httpServer.setExecutor(Executors.newFixedThreadPool(4));
     }
@@ -45,9 +47,16 @@ public class MetricsServer {
 
     public void registerHeartbeatCollector(String nodeId, HeartbeatResponseCollector collector) {
         heartbeatCollectors.put(nodeId, collector);
+        synchronized (this) {
+            nodeHeartbeatStatsMap.put(nodeId, new NodeHeartbeatStats());
+        }
     }
 
     public ResourceManagerMetricsCollector getRmMetricsCollector() {
         return rmMetricsCollector;
+    }
+
+    public Map<String, NodeHeartbeatStats> getNodeHeartbeatStatsMap() {
+        return nodeHeartbeatStatsMap;
     }
 }

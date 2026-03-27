@@ -8,6 +8,7 @@ import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeApplication;
 import org.apache.hadoop.sls.metrics.HeartbeatResponseCollector;
 import org.apache.hadoop.sls.metrics.MetricsData;
+import org.apache.hadoop.sls.metrics.NodeHeartbeatStats;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
@@ -77,6 +78,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     private final ResourceUtilization nodeUtilization;
 
     private final ResourceUtilization containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
+
+    private final NodeHeartbeatStats stats = new NodeHeartbeatStats();
 
     private final SLSConfig slsConfig;
 
@@ -160,6 +163,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     public void heartbeat() throws IOException, YarnException {
+        long startTime = System.currentTimeMillis();
         try {
             NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
             nodeStatus.setResponseId(responseID);
@@ -169,6 +173,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
             request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
             NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
+            long duration = System.currentTimeMillis() - startTime;
+            stats.recordHeartbeat(duration);
             heartbeatCollector.collect(response);
             NodeAction nodeAction = response.getNodeAction();
             if (nodeAction == NodeAction.RESYNC) {
@@ -188,7 +194,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             LOG.debug("response, responseID={}, nmTokenMasterKey={}, tokenSequenceNo={}", responseID, request.getLastKnownNMTokenMasterKey(), response.getTokenSequenceNo());
         } catch (Exception e) {
             LOG.warn("Exception ", e);
-            heartbeatCollector.collect(null);
+            long duration = System.currentTimeMillis() - startTime;
+            stats.recordHeartbeat(duration);
+            if (heartbeatCollector != null) {
+                heartbeatCollector.collect(null);
+            }
         }
     }
 
@@ -270,6 +280,10 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     public HeartbeatResponseCollector getHeartbeatCollector() {
         return heartbeatCollector;
+    }
+
+    public NodeHeartbeatStats getHeartbeatStats() {
+        return stats;
     }
 
     @SuppressWarnings("WhileLoopReplaceableByForEach")
