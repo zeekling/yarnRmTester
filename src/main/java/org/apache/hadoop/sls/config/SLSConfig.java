@@ -34,6 +34,10 @@ public class SLSConfig {
     private static final String SLS_JOB_DURATION = "yarn.fake.job.duration";
 
     private static final String SLS_JOB_CONTAINER_NUM = "yarn.fake.job.container.nums";
+    
+    private static final String MONITOR_ENABLED = "yarn.monitor.enabled";
+    private static final String MONITOR_HTTP_PORT = "yarn.monitor.http.port";
+    private static final String MONITOR_COLLECT_INTERVAL = "yarn.monitor.collect.interval";
 
     private final Properties properties = new Properties();
 
@@ -101,5 +105,21 @@ public class SLSConfig {
         int vcore = Integer.parseInt(properties.getProperty("yarn.fake.job.container.vcore", "1"));
         long memory = Long.parseLong(properties.getProperty("yarn.fake.job.container.memory-mb", "4096"));
         return Resource.newInstance(memory, vcore);
+    }
+    
+    public boolean isMonitorEnabled() {
+        return Boolean.parseBoolean(properties.getProperty(MONITOR_ENABLED, "true"));
+    }
+
+    public int getMonitorHttpPort() {
+        return Integer.parseInt(properties.getProperty(MONITOR_HTTP_PORT, "28080"));
+    }
+
+public int getMonitorCollectInterval() {
+        return Integer.parseInt(properties.getProperty(MONITOR_COLLECT_INTERVAL, "5000"));
+    }
+    
+    public String getProperty(String key, String defaultValue) {
+        return properties.getProperty(key, defaultValue);
     }
 }

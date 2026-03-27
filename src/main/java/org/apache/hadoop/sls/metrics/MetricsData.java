@@ -1,0 +1,65 @@
+package org.apache.hadoop.sls.metrics;
+
+import java.util.concurrent.atomic.AtomicLong;
+
+public class MetricsData {
+    private final AtomicLong totalContainersAllocated = new AtomicLong(0);
+    private final AtomicLong totalContainersReleased = new AtomicLong(0);
+    private final AtomicLong successfulHeartbeats = new AtomicLong(0);
+    private final AtomicLong failedHeartbeats = new AtomicLong(0);
+    private long lastHeartbeatTime;
+    private volatile long lastCollectTime;
+
+    public MetricsData() {
+        this.lastHeartbeatTime = System.currentTimeMillis();
+        this.lastCollectTime = System.currentTimeMillis();
+    }
+
+    public void incrementContainersAllocated() {
+        totalContainersAllocated.incrementAndGet();
+    }
+
+    public void incrementContainersReleased() {
+        totalContainersReleased.incrementAndGet();
+    }
+
+    public void incrementSuccessfulHeartbeats() {
+        successfulHeartbeats.incrementAndGet();
+    }
+
+    public void incrementFailedHeartbeats() {
+        failedHeartbeats.incrementAndGet();
+    }
+
+    public void updateLastHeartbeatTime() {
+        this.lastHeartbeatTime = System.nanoTime();
+    }
+
+    public long getTotalContainersAllocated() {
+        return totalContainersAllocated.get();
+    }
+
+    public long getTotalContainersReleased() {
+        return totalContainersReleased.get();
+    }
+
+    public long getSuccessfulHeartbeats() {
+        return successfulHeartbeats.get();
+    }
+
+    public long getFailedHeartbeats() {
+        return failedHeartbeats.get();
+    }
+
+    public long getLastHeartbeatTime() {
+        return lastHeartbeatTime;
+    }
+
+    public long getLastCollectTime() {
+        return lastCollectTime;
+    }
+
+    public void setLastCollectTime(long lastCollectTime) {
+        this.lastCollectTime = lastCollectTime;
+    }
+}

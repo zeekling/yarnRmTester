@@ -6,6 +6,9 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.sls.config.SLSConfig;
 import org.apache.hadoop.sls.job.FakeApplication;
+import org.apache.hadoop.sls.metrics.HeartbeatResponseCollector;
+import org.apache.hadoop.sls.metrics.MetricsData;
+import org.apache.hadoop.sls.metrics.NodeHeartbeatStats;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.*;
 import org.apache.hadoop.yarn.api.records.*;
@@ -76,6 +79,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     private final ResourceUtilization containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
 
+    private final NodeHeartbeatStats stats = new NodeHeartbeatStats();
+
     private final SLSConfig slsConfig;
 
     private final YarnConfiguration config;
@@ -83,6 +88,8 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     private final int httpPort;
 
     private final NMTokenSecretManagerInNM tokenSecretManager = new NMTokenSecretManagerInNM();
+    
+    private HeartbeatResponseCollector heartbeatCollector;
 
     public YarnFakeNodeManager(int containerManagerPort, int httpPort,
                                String rackName, Resource capability, YarnConfiguration config, SLSConfig slsConfig) throws IOException, YarnException {
@@ -101,6 +108,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
         Map<String, Float> customResources = new HashMap<>();
         nodeUtilization = ResourceUtilization.newInstance(0, 0, 0f, customResources);
         customResources.put("yarn.io/gpu", 0f);
+        this.heartbeatCollector = new HeartbeatResponseCollector(new MetricsData());
         registerNodeManager();
         initRpcServer(config, containerManagerPort, hostName);
         initHttpServer(httpPort, hostName);
@@ -155,6 +163,7 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
     }
 
     public void heartbeat() throws IOException, YarnException {
+        long startTime = System.currentTimeMillis();
         try {
             NodeStatus nodeStatus = createNodeStatus(nodeId, getContainerStatuses(containers));
             nodeStatus.setResponseId(responseID);
@@ -164,6 +173,9 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             request.setLastKnownNMTokenMasterKey(nmTokenMasterKey);
             request.setLastKnownContainerTokenMasterKey(nmTokenMasterKey);
             NodeHeartbeatResponse response = resourceTracker.nodeHeartbeat(request);
+            long duration = System.currentTimeMillis() - startTime;
+            stats.recordHeartbeat(duration);
+            heartbeatCollector.collect(response);
             NodeAction nodeAction = response.getNodeAction();
             if (nodeAction == NodeAction.RESYNC) {
                 registerNodeManager();
@@ -182,6 +194,11 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
             LOG.debug("response, responseID={}, nmTokenMasterKey={}, tokenSequenceNo={}", responseID, request.getLastKnownNMTokenMasterKey(), response.getTokenSequenceNo());
         } catch (Exception e) {
             LOG.warn("Exception ", e);
+            long duration = System.currentTimeMillis() - startTime;
+            stats.recordHeartbeat(duration);
+            if (heartbeatCollector != null) {
+                heartbeatCollector.collect(null);
+            }
         }
     }
 
@@ -259,6 +276,14 @@ public class YarnFakeNodeManager implements ContainerManagementProtocol {
 
     public Map<Container, ContainerStatus> getContainerStatusMap() {
         return containerStatusMap;
+    }
+
+    public HeartbeatResponseCollector getHeartbeatCollector() {
+        return heartbeatCollector;
+    }
+
+    public NodeHeartbeatStats getHeartbeatStats() {
+        return stats;
     }
 
     @SuppressWarnings("WhileLoopReplaceableByForEach")

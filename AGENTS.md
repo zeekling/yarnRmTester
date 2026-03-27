@@ -68,6 +68,8 @@ import org.slf4j.Logger;
 - 命名要表达意图，例如 useTotalBytes 而非 ctb。
 - 方法长度：若超过约 200 行，应分解为私有方法。
 - 注释：解释为什么而非仅描述做了什么。
+- Lambda 表达式：优先使用简洁的 Lambda，但保持可读性；复杂逻辑抽取为方法。
+- 线程池：使用 Executors.newFixedThreadPool 创建固定大小线程池，确保调用 shutdown()。
 
 错误处理与可观测性
 - 抛出带上下文的异常，避免信息丢失。
@@ -93,10 +95,27 @@ import org.slf4j.Logger;
 - 本地执行测试，确保在干净环境中也能通过。
 
 环境与工具
-- Java 版本要与 pom.xml 对应。
+- Java 版本要与 pom.xml 对应（Hadoop 3.4.1 要求 Java 8+，建议 Java 17）。
 - Maven Wrapper 优先使用，如有则直接使用 ./mvnw。
 - Git 提交历史要干净，信息可读。
 - IDE 配置要统一格式化规则。
+
+编译与运行入口
+- 编译主程序：mvn compile
+- 打包并执行 Fake NM：
+  ```bash
+  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSNodeManager /path/to/config/
+  ```
+- 运行压力测试：
+  ```bash
+  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSRunner /path/to/config/
+  ```
+- 配置文件路径：src/main/resources 下的 fake.properites、core-site.xml、hdfs-site.xml、yarn-site.xml
+
+依赖管理
+- Hadoop 版本：3.4.1（通过 pom.xml 覆盖版本）。
+- 测试框架：JUnit 3.8.1，注意与 JUnit 4.x 用法区别。
+- 运行依赖：maven-dependency-plugin 会自动复制依赖到 target/lib 目录。
 
 Cursor 规则
 - Cursor 规则目录未发现（.cursor/rules/ 或 .cursorrules），如后续出现将合并进来。
@@ -112,6 +131,14 @@ Copilot 规则
 - 如需改进本 AGENTS.md，请提交 issue 以说明原因与背景。
 - 文档随工具链变化进行定期更新。
 
+项目结构与组件（重要）
+- SLSRunner：压力测试主入口，控制 Fake 作业提交。
+- SLSNodeManager：Fake NM 主入口，模拟多个 NM 节点。
+- FakeJob/FakeApplication：模拟作业和应用逻辑，由线程池管理。
+- YarnFakeNodeManager：Fake NM 实现，管理 Container，不实际启动。
+- SLSConfig：配置加载器，读取 fake.properites。
+- CommonUtils：工具类，包含 future 等待、资源字符串转换等通用函数。
+
 RM/NM 压力仿真场景（扩展）
  - 场景目标：在高并发、资源紧张、节点故障等条件下，测试 RM 的调度、资源分配、心跳与容错策略，以及 NM 的承载能力和自愈能力。
  - 场景配置：通过 FakeJob、YarnFakeNodeManager、SLSConfig 等组件组合实现；通过修改 fake.properites、core-site.xml、hdfs-site.xml、yarn-site.xml 等实现压力等级的切换。
@@ -123,3 +150,23 @@ RM/NM 压力仿真场景（扩展）
  - 指标与观测：提交吞吐、平均/最大延迟、心跳延迟、丢失率、资源利用率、成功/失败比例、节点恢复时间、日志中的关键事件计数；
  - 实现方式与扩展：可在 SLSRunner/SLSNodeManager 的入口添加压力测试入口函数 PressureTestMain，支持 -DpressureMode、-Diterations、-Dconcurrency 等参数；
  - 运行注意：在仿真环境中执行，完成后清理数据与状态，确保可重复性；
+
+代码结构说明
+- 核心组件：
+  * SLSRunner: 主要用于提交FakeJob，模拟客户端行为
+  * SLSNodeManager: 模拟多个NodeManager节点，管理YarnFakeNodeManager实例
+  * YarnFakeNodeManager: 实现ContainerManagementProtocol接口，模拟NodeManager行为
+  * FakeJob: 模拟ApplicationMaster，负责提交应用和管理容器
+  * FakeApplication: 管理应用级别的容器操作
+  * SLSConfig: 配置管理类，读取fake.properties配置文件
+  * CommonUtils: 工具类，提供Future等待等通用功能
+  * MetricsServer: 指标收集服务，提供HTTP接口暴露监控数据
+  * HeartbeatResponseCollector: 心跳响应收集器，用于收集和分析RM的心跳响应
+
+- 重要类和方法：
+  * SLSRunner.main(): 压力测试入口，负责初始化配置和提交FakeJob
+  * SLSNodeManager.main(): Fake NM入口，初始化多个YarnFakeNodeManager实例
+  * YarnFakeNodeManager.heartbeat(): 模拟NodeManager心跳，与ResourceManager通信
+  * YarnFakeNodeManager.startContainers(): 处理容器启动请求
+  * FakeJob.submit(): 提交Fake应用到ResourceManager
+  * SLSConfig: 提供所有配置项的访问方法

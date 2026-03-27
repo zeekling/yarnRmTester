@@ -2,19 +2,18 @@ package org.apache.hadoop.sls;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.sls.config.SLSConfig;
-import org.apache.hadoop.sls.job.FakeApplication;
+import org.apache.hadoop.sls.metrics.MetricsServer;
+import org.apache.hadoop.sls.metrics.HeartbeatResponseCollector;
 import org.apache.hadoop.sls.nm.JobStatUpdater;
 import org.apache.hadoop.sls.nm.YarnFakeNodeManager;
 import org.apache.hadoop.sls.util.CommonUtils;
 import org.apache.hadoop.yarn.api.records.NodeId;
-import org.apache.hadoop.yarn.api.records.NodeLabel;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.client.ClientRMProxy;
-import org.apache.hadoop.yarn.client.util.YarnClientUtils;
+import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocol;
-import org.apache.hadoop.yarn.server.api.protocolrecords.AddToClusterNodeLabelsRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,11 +27,18 @@ import java.util.concurrent.*;
 
 import static org.apache.hadoop.sls.nm.NodeManagerCommon.FAKE_NODE_MANAGER_MAP;
 
+/**
+ * SLSNodeManager manages fake NodeManagers and metrics collection for YARN simulation.
+ * This class initializes multiple fake NodeManagers and starts a metrics server to 
+ * collect and expose metrics about the YARN cluster simulation.
+ */
 public class SLSNodeManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(SLSNodeManager.class);
 
     private static ExecutorService executor = null;
+    private static MetricsServer metricsServer;
+    private static int metricsPort = 28080; // Default port
 
     public static void main(String[] args) throws IOException, YarnException {
         String configPath = "D:\\project\\gitea\\yarnRmTester\\src\\main\\resources";
@@ -53,8 +59,25 @@ public class SLSNodeManager {
         LOG.info("Fake container capacity: {}", slsConfig.getJobContainerResource());
         initFakeNM(slsConfig, capacity, config, fakeNodeManagerMap);
         LOG.info("==== Init Fake NM success, Fake NM count={} ======", fakeNodeManagerMap.size());
+
+        // Initialize metrics server
+        initMetricsServer(config, slsConfig);
+        
         JobStatUpdater updater = new JobStatUpdater(slsConfig, fakeNodeManagerMap, config);
         updater.updateAsync();
+        
+        // Add shutdown hook for metrics server
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOG.info("Shutting down metrics server...");
+            if (metricsServer != null) {
+                try {
+                    metricsServer.stop();
+                } catch (Exception e) {
+                    LOG.error("Error stopping metrics server", e);
+                }
+            }
+        }));
+        
         beginHeartBeat(fakeNodeManagerMap, executor);
     }
 
@@ -79,6 +102,35 @@ public class SLSNodeManager {
             futures.add(future);
         }
         CommonUtils.waitFutures(futures);
+    }
+
+    private static void initMetricsServer(YarnConfiguration config, SLSConfig slsConfig) {
+        try {
+            String portStr = slsConfig.getProperty("yarn.monitor.http.port", "28080");
+            metricsPort = Integer.parseInt(portStr);
+            
+            if (!slsConfig.isMonitorEnabled()) {
+                LOG.info("Metrics server is disabled");
+                return;
+            }
+            
+            YarnClient yarnClient = YarnClient.createYarnClient();
+            yarnClient.init(config);
+            yarnClient.start();
+            
+            metricsServer = new MetricsServer(metricsPort, yarnClient);
+            
+            // Register heartbeat collectors for each fake NM
+            for (Map.Entry<NodeId, YarnFakeNodeManager> entry : FAKE_NODE_MANAGER_MAP.entrySet()) {
+                YarnFakeNodeManager nm = entry.getValue();
+                metricsServer.registerHeartbeatCollector(nm.getNodeId().toString(), nm.getHeartbeatCollector());
+            }
+            
+            metricsServer.start();
+            LOG.info("Metrics server started on port {}", metricsPort);
+        } catch (Exception e) {
+            LOG.error("Failed to initialize metrics server", e);
+        }
     }
 
     private static void beginHeartBeat(Map<NodeId, YarnFakeNodeManager> fakeNodeManagerMap, ExecutorService executor) {
