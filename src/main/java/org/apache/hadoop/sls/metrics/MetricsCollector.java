@@ -191,7 +191,8 @@ public class MetricsCollector implements AutoCloseable {
             return true;
 
         } catch (IOException e) {
-            LOG.warn("Failed to connect to metrics server at {}: {}", metricsServerUrl, e.getMessage());
+            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            LOG.warn("Failed to connect to metrics server at {}: {} (hint: verify hostname, check if MetricsServer on port 28080 is running)", metricsServerUrl, detail);
             return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
