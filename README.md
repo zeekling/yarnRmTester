@@ -16,10 +16,11 @@ Hadoop自带的hadoop-sls只能用于压测调度器，可在实际中影响Reso
 - Fake NM：构造大量的Fake NM。在Fake NM里面主要做Container的管理，不会真正的启动。防止占用大量资源。
 - Fake AM: 构造的AM。只是一个对象，所有的AM由线程池管理，用于申请新的Container、控制整个作业的运行时长。
 - SLSRunner: 压测模块，由于NM是Fake的，作业也是Fake的，只用于控制提交作业的数量。
+- SLSMetrics：独立运行的监控服务，通过 MetricsServer HTTP API 和 YARN RM RPC 周期性采集指标，存储到 SQLite 并生成 PNG 趋势图。
 
 # 运行
 
-主要包含两个模块，Fake NM和SLSRunner。分别控制构造NM和压测RM。
+主要包含三个模块：Fake NM 构造大量模拟 NM 节点、SLSRunner 执行压测任务、SLSMetrics 提供独立监控服务。
 
 ## Fake NM 运行
 
@@ -71,5 +72,79 @@ java -cp .:lib/*:config/* org.apache.hadoop.sls.SLSNodeManager /home/hadoop01/fa
 ```bash
 java -cp .:lib/* org.apache.hadoop.sls.SLSRunner /home/hadoop01/fakeNM/config/
 ```
+
+## SLSMetrics 监控服务
+
+SLSMetrics 是一个独立运行的监控服务，用于对压测过程进行可视化监控和数据持久化。它不依赖 Fake NM 或 SLSRunner，可单独启动。
+
+### 架构
+
+```
+MetricsCollector (定时采集)
+    |
+    ├─→ MetricsStore (内存环形缓冲区，容量由 yarn.metrics.store.size 控制)
+    ├─→ MetricsDatabase (SQLite 持久化)
+    |
+    ChartGenerator (定时生成 PNG 趋势图，间隔由 yarn.metrics.chart.interval 控制)
+```
+
+- **MetricsCollector**：周期性从 MetricsServer HTTP API（默认 28080 端口）和 YARN RM RPC 采集指标数据。
+- **MetricsStore**：内存中的环形缓冲区，暂存最近的指标数据，供 ChartGenerator 使用。
+- **MetricsDatabase**：将指标数据写入 SQLite 数据库，支持按天数保留自动清理。
+- **ChartGenerator**：基于 JFreeChart 生成四种 PNG 趋势图：
+  - Container 趋势图
+  - 资源利用率趋势图
+  - 应用状态趋势图
+  - 心跳延迟趋势图
+
+### 前置条件
+
+- YARN RM 必须正常运行。
+- MetricsServer（内嵌在 SLSNodeManager 中，默认端口 28080）必须可访问。
+- 如需从 RM RPC 采集指标，需配置 core-site.xml / yarn-site.xml。
+
+### 配置项
+
+SLSMetrics 的配置项以 `yarn.metrics.*` 为前缀，写在 `fake.properites` 中：
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `yarn.metrics.collect.interval` | 5000 | 指标采集间隔（毫秒） |
+| `yarn.metrics.chart.interval` | 30000 | 图表生成间隔（毫秒） |
+| `yarn.metrics.store.size` | 3600 | 内存环形缓冲区容量 |
+| `yarn.metrics.output.dir` | target/metrics | 图表输出目录 |
+| `yarn.metrics.server.url` | http://localhost:28080/metrics | MetricsServer HTTP 端点 |
+| `yarn.metrics.db.path` | target/metrics/metrics.db | SQLite 数据库路径 |
+| `yarn.metrics.db.batch.size` | 10 | SQLite 批量写入条数 |
+| `yarn.metrics.db.retention.days` | 7 | 数据保留天数 |
+| `yarn.metrics.db.cleanup.interval` | 3600000 | 数据清理间隔（毫秒） |
+
+### 运行方式
+
+**使用启动脚本：**
+
+Windows：
+```bash
+start-metrics.bat [config_dir]
+```
+
+Linux / Mac：
+```bash
+chmod +x start-metrics.sh
+./start-metrics.sh [config_dir]
+```
+
+**直接运行：**
+```bash
+java -cp "target/lib/*;target/classes" org.apache.hadoop.sls.metrics.SLSMetrics [config_dir]
+```
+
+`config_dir` 为可选参数，默认为 `src/main/resources`，目录内需包含 `fake.properites` 及必要的 XML 配置文件。
+
+### 输出
+
+- **SQLite 数据库**：`target/metrics/metrics.db`，包含历史指标数据。
+- **PNG 趋势图**：`target/metrics/` 目录下定时生成四种趋势图。
+- 指标分为五类：集群资源、Container 调度、应用状态、心跳统计、队列统计。
 
 

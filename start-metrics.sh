@@ -12,4 +12,4 @@ if [ ! -d "target" ] || [ ! -d "target/lib" ] || [ ! -d "target/classes" ]; then
 fi
 
 # 启动监控服务
-java -cp "target/lib/*:target/classes" org.apache.hadoop.sls.SLSMetrics $CONFIG_DIR
+java -cp "target/lib/*:target/classes" org.apache.hadoop.sls.metrics.SLSMetrics $CONFIG_DIR

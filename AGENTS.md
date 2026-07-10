@@ -1,172 +1,97 @@
 # AGENTS
 
 规则说明
-- AGENTS.md 使用中文描述：本文件内的所有描述应以中文撰写，以确保团队内外的一致性与易读性。
-- 如需要包含代码段或命令，请在保持原始语义的前提下，附上中文解释，必要时使用中文注释。
+- AGENTS.md 使用中文描述。
+- 如包含代码段或命令，在保持原始语义的前提下附上中文解释。
 
-概览
-- 本仓库是一个 Java Maven 项目，用于 Hadoop/YARN 圈的实验场景。构建、测试、lint 命令在不同环境中应保持稳定。
-- 指南强调在 CI 或本地自动化中的可重复性、确定性；遇到不确定处，请优先选择明确的命令和步骤，以确保可复现性。
-- 如需要，后续可添加更多约束，如静态分析、依赖审查等。
+## 项目本质
 
-构建 / lint / 测试 命令
-- 构建（编译并打包）:
-  mvn clean package
-- 构建并跳过测试（快速迭代）:
-  mvn -DskipTests clean package
-- 运行全部测试:
-  mvn test
-- 运行单个测试类（JUnit 3/4 风格）:
-  mvn -Dtest=SomeTest test
-- 运行单个测试方法:
-  mvn -Dtest=SomeTest#testMethod test
-- 运行子集测试（不打包）:
-  mvn -Dtest=SomeTest#testMethod test
-- 快速检查代码风格（Checkstyle）:
-  mvn checkstyle:checkstyle 或 mvn -Dcheckstyle.consoleOutput=true checkstyle:check
-- 使用 Maven Wrapper（若存在）:
-  ./mvnw clean package 或 mvnw.bat clean package
+单模块 Maven 项目，用于构造海量 Fake NM 节点对真实 YARN RM 进行压力测试。核心思想：Fake NM 不做真正的容器启动，Fake AM 只是线程池管理的对象，所有操作都是 RPC 级别的模拟。
 
-运行单测的推荐模式
-- 仅运行某个方法:
-  mvn -Dtest=com.example.SomeTest#testSpecificBehavior test
-- 仅运行某个类:
-  mvn -Dtest=com.example.SomeTest test
-- Surefire：始终使用显式的测试目标，避免执行无关测试。
-- 在 CI 场景中，固定具体测试减少回归风险。
+## 构建
 
-代码风格指南（Java）
-- 规则概览：一致性、可读性与可维护性优先。
-- 缩进：4 空格，禁止使用制表符。
-- 行长：建议不超过约 120 字符，必要时换行。
-- 大括号：K&R 风格，左花括号与语句同行，右花括号单独一行。
-- Imports：先 java.*，再第三方，最后内部包；分组并排序；禁止未使用导入。
-- 包结构：遵循 Maven 的标准布局，顶级包应唯一且清晰。
-- 命名：类名 PascalCase；方法名 lowerCamelCase；常量 UPPER_SNAKE_CASE。
-- 方法设计：短小、聚焦单一职责；一个类内方法数量适中。
-- 可见性：最小暴露原则，公共接口应具备清晰契约。
-- 异常处理：尽量捕获具体异常，避免吞掉上下文；必要时封装并抛出具备上下文的异常。
-- 日志：统一使用 SLF4J，避免 System.out.println。
-- 泛型：避免原始类型，尽量使用泛型提高类型安全。
-- 空值处理：参数校验、使用 Optional提升表达力，必要时抛出有意义的异常。
-- 线程与并发：使用固定大小的线程池，避免死锁，确保关闭。
-- 资源管理：资源要在 finally/try-with-resources 中关闭。
-- 测试设计：测试快速、可重复、独立、断言清晰。
-- 文档：必要处写 Javadoc，避免冗余注释。
-- 性能与优化：先注重清晰性，再进行必要的优化；如需优化请先进行基准测试。
-- 可访问性：代码结构应便于新成员理解和贡献。
+```bash
+# 编译并打包（会自动复制依赖到 target/lib）
+mvn clean package
 
-导入、格式、命名（示例）
-- 导入排序示例：
-```java
-import java.util.List;
-import java.util.Map;
+# 跳过测试快速迭代
+mvn -DskipTests clean package
 
-import org.apache.hadoop.yarn.*; // 示例
-import org.slf4j.Logger;
+# 仅编译
+mvn compile
+
+# 打包时不带 site 配置文件（core-site.xml / hdfs-site.xml / yarn-site.xml / fake.properites 会被排除）
 ```
-- 命名要表达意图，例如 useTotalBytes 而非 ctb。
-- 方法长度：若超过约 200 行，应分解为私有方法。
-- 注释：解释为什么而非仅描述做了什么。
-- Lambda 表达式：优先使用简洁的 Lambda，但保持可读性；复杂逻辑抽取为方法。
-- 线程池：使用 Executors.newFixedThreadPool 创建固定大小线程池，确保调用 shutdown()。
 
-错误处理与可观测性
-- 抛出带上下文的异常，避免信息丢失。
-- 日志中包含关键标识、状态、错误码等上下文。
-- 不暴露敏感信息，必要时采用安全日志策略。
+- **pom.xml 声明 Java 21 + `--enable-preview`**，但 CI 用 JDK 17（`.github/workflows/maven.yml`）。本地开发请用 JDK 21。
+- 不存在 Maven Wrapper，直接用系统 `mvn`。
+- **不存在 Checkstyle / PMD / SpotBugs 等静态检查插件**，`mvn checkstyle:check` 不可用。
+- 依赖通过 `maven-dependency-plugin` 在 package 阶段复制到 `target/lib`。
 
-并发与同步
-- 使用固定大小的线程池，优雅关闭。
-- 使用并发集合或同步块保护共享状态。
-- 避免阻塞在事件循环线程，必要时改为异步设计。
+## 测试
 
-测试策略
-- 测试应快速、可重复且独立于外部系统。
-- 测试用例命名要清晰，断言应明确表达期望。
-- 优先单元测试，减少对外部依赖。
-- 数据准备和清理要简单、可重复。
-- 多线程场景要覆盖并发安全性。
-
-仓库与 CI 健康
-- 提交信息应解释原因而不仅仅描述内容。
-- 不提交密钥/凭据等敏感信息。
-- PR 应聚焦单一逻辑变更，便于评审。
-- 本地执行测试，确保在干净环境中也能通过。
-
-环境与工具
-- Java 版本要与 pom.xml 对应（Hadoop 3.4.1 要求 Java 8+，建议 Java 17）。
-- Maven Wrapper 优先使用，如有则直接使用 ./mvnw。
-- Git 提交历史要干净，信息可读。
-- IDE 配置要统一格式化规则。
-
-编译与运行入口
-- 编译主程序：mvn compile
-- 打包并执行 Fake NM：
+- **JUnit 3.8.1** + Mockito 4.11.0
+- JUnit 3 风格：**没有 `@Test` 注解**，测试类不需要 `extends TestCase`，方法名以 `test` 开头即可被 Surefire 识别。
+- 使用 `junit.framework.Assert`（不是 `org.junit.Assert`）。
+- 测试配置文件使用 `src/test/resources/sls-test.properties`（与主配置分离）。
+- 集成测试会构造真实的 `YarnFakeNodeManager` 实例并调用 RPC，依赖本地 YARN 配置。
+- 单元测试命令：
   ```bash
-  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSNodeManager /path/to/config/
+  mvn -Dtest=org.apache.hadoop.sls.metrics.MetricsDataTest test
+  mvn -Dtest=org.apache.hadoop.sls.metrics.MetricsDataTest#testMultipleHeartbeatTimeUpdates test
   ```
-- 运行压力测试：
-  ```bash
-  java -cp target/lib/*;target/classes org.apache.hadoop.sls.SLSRunner /path/to/config/
-  ```
-- 配置文件路径：src/main/resources 下的 fake.properites、core-site.xml、hdfs-site.xml、yarn-site.xml
 
-依赖管理
-- Hadoop 版本：3.4.1（通过 pom.xml 覆盖版本）。
-- 测试框架：JUnit 3.8.1，注意与 JUnit 4.x 用法区别。
-- 运行依赖：maven-dependency-plugin 会自动复制依赖到 target/lib 目录。
+## 入口与运行
 
-Cursor 规则
-- Cursor 规则目录未发现（.cursor/rules/ 或 .cursorrules），如后续出现将合并进来。
+| 类 | 作用 | 启动方式 |
+|---|---|---|
+| `SLSNodeManager.main()` | 构造大量 Fake NM 并注册到 RM，启动心跳循环 + Metrics Server | `java -cp "target/lib/*;target/classes" org.apache.hadoop.sls.SLSNodeManager <config_dir>` |
+| `SLSRunner.main()` | 提交批量 FakeJob 进行压测 | `java -cp "target/lib/*;target/classes" org.apache.hadoop.sls.SLSRunner <config_dir>` |
 
-Copilot 规则
-- Copilot 指引文件未发现（.github/copilot-instructions.md），如未来存在将纳入本文件。
+两个入口都内嵌了默认配置路径（硬编码为 `src/main/resources`），传命令行参数可覆盖。
 
-变更记录与演进
-- 版本变更应简述为何修改，避免只描述变更内容。
-- 如有重大改动，优先附上回滚与兼容性说明。
+## 关键文件
 
-联系和演进路径
-- 如需改进本 AGENTS.md，请提交 issue 以说明原因与背景。
-- 文档随工具链变化进行定期更新。
+| 文件 | 说明 |
+|---|---|
+| `src/main/resources/fake.properites` | **注意文件名有 typo：`properites` 而非 `properties`**，代码中硬编码了此文件名，不可改名 |
+| `src/main/resources/{core,hdfs,yarn}-site.xml` | 从目标 RM 集群获取，构建时会从 JAR 中排除，需外部提供 |
+| `src/test/resources/sls-test.properties` | 测试用独立配置文件 |
+| `start-metrics.bat` / `start-metrics.sh` | 引用了 `org.apache.hadoop.sls.SLSMetrics`，**但该类在源码中不存在** |
 
-项目结构与组件（重要）
-- SLSRunner：压力测试主入口，控制 Fake 作业提交。
-- SLSNodeManager：Fake NM 主入口，模拟多个 NM 节点。
-- FakeJob/FakeApplication：模拟作业和应用逻辑，由线程池管理。
-- YarnFakeNodeManager：Fake NM 实现，管理 Container，不实际启动。
-- SLSConfig：配置加载器，读取 fake.properites。
-- CommonUtils：工具类，包含 future 等待、资源字符串转换等通用函数。
+## 核心组件
 
-RM/NM 压力仿真场景（扩展）
- - 场景目标：在高并发、资源紧张、节点故障等条件下，测试 RM 的调度、资源分配、心跳与容错策略，以及 NM 的承载能力和自愈能力。
- - 场景配置：通过 FakeJob、YarnFakeNodeManager、SLSConfig 等组件组合实现；通过修改 fake.properites、core-site.xml、hdfs-site.xml、yarn-site.xml 等实现压力等级的切换。
- - 场景设计示例：
-   1) 基线场景：中等并发、适量 NM，资源充足，观察基线吞吐与响应时间；
-   2) 资源紧张场景：增大作业数、降低 NM 容量，观察等待队列长度与调度延迟；
-   3) 节点故障场景：部分 NM 停止心跳，评估 RM 的故障转移及任务重调度时序；
-   4) 突发高优先级场景：触发抢占策略，评估响应时间与正确性；
- - 指标与观测：提交吞吐、平均/最大延迟、心跳延迟、丢失率、资源利用率、成功/失败比例、节点恢复时间、日志中的关键事件计数；
- - 实现方式与扩展：可在 SLSRunner/SLSNodeManager 的入口添加压力测试入口函数 PressureTestMain，支持 -DpressureMode、-Diterations、-Dconcurrency 等参数；
- - 运行注意：在仿真环境中执行，完成后清理数据与状态，确保可重复性；
+- **`SLSConfig`** — 读取 `fake.properites`，提供所有配置项的 getter（NM 数量、端口范围、线程池大小、作业参数、监控配置）。
+- **`YarnFakeNodeManager`** — 实现 `ContainerManagementProtocol`，通过 YARN RPC 注册到真实 RM，周期性 heartbeat，管理 Container 状态。**不真正启动进程**。
+- **`FakeJob`** — 模拟客户端，通过 `ApplicationClientProtocol` 向 RM 提交应用。
+- **`FakeApplication`** — 模拟 AM，向 RM 注册、申请 Container、通过 `ContainerManagementProtocol`"启动"容器。
+- **`NodeManagerCommon`** — 持有全局 `Map<NodeId, YarnFakeNodeManager>` 静态变量，所有组件通过它查找 Fake NM。
+- **`MetricsServer`** — 内嵌在 `SLSNodeManager` 中的 HTTP 服务（端口默认 28080），暴露 `/metrics` 接口。
+- **`HeartbeatResponseCollector`** / **`MetricsData`** — 收集每次心跳的响应数据（成功/失败次数、容器分配/释放数）。
+- **`NodeHeartbeatStats`** — 线程安全的心跳延迟统计（计数、总耗时、最大/最小/平均耗时）。
+- **`ResourceManagerMetricsCollector`** — 通过 `YarnClient` 从 RM 获取集群指标。
 
-代码结构说明
-- 核心组件：
-  * SLSRunner: 主要用于提交FakeJob，模拟客户端行为
-  * SLSNodeManager: 模拟多个NodeManager节点，管理YarnFakeNodeManager实例
-  * YarnFakeNodeManager: 实现ContainerManagementProtocol接口，模拟NodeManager行为
-  * FakeJob: 模拟ApplicationMaster，负责提交应用和管理容器
-  * FakeApplication: 管理应用级别的容器操作
-  * SLSConfig: 配置管理类，读取fake.properties配置文件
-  * CommonUtils: 工具类，提供Future等待等通用功能
-  * MetricsServer: 指标收集服务，提供HTTP接口暴露监控数据
-  * HeartbeatResponseCollector: 心跳响应收集器，用于收集和分析RM的心跳响应
+## 包结构
 
-- 重要类和方法：
-  * SLSRunner.main(): 压力测试入口，负责初始化配置和提交FakeJob
-  * SLSNodeManager.main(): Fake NM入口，初始化多个YarnFakeNodeManager实例
-  * YarnFakeNodeManager.heartbeat(): 模拟NodeManager心跳，与ResourceManager通信
-  * YarnFakeNodeManager.startContainers(): 处理容器启动请求
-  * FakeJob.submit(): 提交Fake应用到ResourceManager
-  * SLSConfig: 提供所有配置项的访问方法
+```
+org.apache.hadoop.sls           — SLSRunner, SLSNodeManager（入口）
+org.apache.hadoop.sls.config    — SLSConfig
+org.apache.hadoop.sls.job       — FakeJob, FakeApplication
+org.apache.hadoop.sls.nm        — YarnFakeNodeManager, NodeManagerCommon, NMHttpHandler, JobStatUpdater
+org.apache.hadoop.sls.metrics   — MetricsServer, MetricsHttpHandler, MetricsData, NodeHeartbeatStats, HeartbeatResponseCollector, ResourceManagerMetricsCollector
+org.apache.hadoop.sls.util      — CommonUtils
+```
+
+包名使用 `org.apache.hadoop.sls`（与 Hadoop SLS 保持一致），非 `org.example`。
+
+## CI 配置
+
+- GitHub Actions（`.github/workflows/maven.yml`）：push/PR 到 main 触发，JDK 17 + `mvn -B package`。
+- **已知不匹配**：CI 用 JDK 17，但 pom.xml 需要 JDK 21 + `--enable-preview`。构建可能因 preview 特性失败。
+
+## 注意事项
+
+- 所有 XMl site 配置文件从 JAR 中排除，运行时必须通过 classpath 或外部目录提供。
+- `fake.properites` 文件名的 typo 是故意的——代码和配置文件名保持一致即可。
+- `.gitignore` 排除了 `.opencode/` 目录，OpenCode 本地配置不提交。
+- 修改线程池大小时注意：`yarn.fake.threadpool.size` 控制心跳线程池，`yarn.fake.job.update.threadpool.size` 控制作业状态更新线程池。
