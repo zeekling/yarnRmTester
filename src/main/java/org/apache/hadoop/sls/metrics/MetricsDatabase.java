@@ -3,6 +3,7 @@ package org.apache.hadoop.sls.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -48,6 +49,15 @@ public class MetricsDatabase implements AutoCloseable {
         Connection conn = null;
         ScheduledExecutorService exec = null;
         try {
+            // 确保父目录存在
+            File dbFile = new File(dbPath);
+            File parentDir = dbFile.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                if (parentDir.mkdirs()) {
+                    LOG.debug("Created parent directories for database: {}", parentDir.getAbsolutePath());
+                }
+            }
+
             // 加载 SQLite JDBC 驱动
             Class.forName("org.sqlite.JDBC");
             conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
