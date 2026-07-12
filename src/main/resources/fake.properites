@@ -18,13 +18,13 @@ yarn.monitor.enabled=true
 yarn.monitor.http.port=28080
 yarn.monitor.collect.interval=5000
 
-# SLSMetrics 采集与图表配置
+# SLSMetrics 采集与 Web 仪表盘配置
 yarn.metrics.collect.interval=5000
-yarn.metrics.chart.interval=30000
 yarn.metrics.store.size=3600
-yarn.metrics.output.dir=target/metrics
-# MetricsServer 内嵌在 SLSNodeManager 中，默认监听 28080。本地运行用 localhost
-yarn.metrics.server.url=http://localhost:28080/metrics
+yarn.metrics.web.port=28081
+yarn.metrics.server.url=http://hadoop01:8088/jmx?qry=Hadoop:*
+yarn.metrics.nm.collect.enabled=false
+yarn.metrics.nm.url=http://localhost:28080
 
 # SLSMetrics 数据库配置（SQLite）
 yarn.metrics.db.path=target/metrics/metrics.db

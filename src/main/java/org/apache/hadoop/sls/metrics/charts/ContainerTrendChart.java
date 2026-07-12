@@ -18,7 +18,8 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 容器趋势折线图：显示已分配(Allocated)、已释放(Released)、活跃(Active) 容器数量随时间变化。
+ * 容器趋势折线图：显示活跃(Active) 容器数量随时间变化。
+ * 数据来源：RM RPC NodeReport.getNumContainers()。
  */
 public class ContainerTrendChart {
 
@@ -35,24 +36,18 @@ public class ContainerTrendChart {
      * @return JFreeChart 对象
      */
     public static JFreeChart createChart(List<MetricsSnapshot> snapshots) {
-        TimeSeries allocatedSeries = new TimeSeries("Allocated");
-        TimeSeries releasedSeries = new TimeSeries("Released");
-        TimeSeries activeSeries = new TimeSeries("Active");
+        TimeSeries activeSeries = new TimeSeries("Active Containers");
 
         for (MetricsSnapshot snap : snapshots) {
             Millisecond period = new Millisecond(new Date(snap.getTimestamp()));
-            allocatedSeries.addOrUpdate(period, snap.getTotalContainersAllocated());
-            releasedSeries.addOrUpdate(period, snap.getTotalContainersReleased());
-            activeSeries.addOrUpdate(period, snap.getActiveContainers());
+            activeSeries.addOrUpdate(period, (double) snap.getActiveContainers());
         }
 
         TimeSeriesCollection dataset = new TimeSeriesCollection();
-        dataset.addSeries(allocatedSeries);
-        dataset.addSeries(releasedSeries);
         dataset.addSeries(activeSeries);
 
         JFreeChart chart = ChartFactory.createTimeSeriesChart(
-                "Container Trend",
+                "Active Containers",
                 "Time",
                 "Count",
                 dataset,
@@ -70,9 +65,7 @@ public class ContainerTrendChart {
         // 隐藏形状，设置颜色
         XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
         renderer.setDefaultShapesVisible(false);
-        renderer.setSeriesPaint(0, Color.decode("#1f77b4")); // 蓝色 - Allocated
-        renderer.setSeriesPaint(1, Color.decode("#ff7f0e")); // 橙色 - Released
-        renderer.setSeriesPaint(2, Color.decode("#2ca02c")); // 绿色 - Active
+        renderer.setSeriesPaint(0, Color.decode("#2ca02c")); // 绿色 - Active Containers
 
         // X 轴日期格式
         DateAxis dateAxis = (DateAxis) plot.getDomainAxis();

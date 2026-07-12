@@ -2,114 +2,149 @@ package org.apache.hadoop.sls.metrics;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.hadoop.yarn.api.records.ApplicationReport;
-import org.apache.hadoop.yarn.api.records.QueueInfo;
-import org.apache.hadoop.yarn.api.records.YarnApplicationState;
-import org.apache.hadoop.yarn.client.api.YarnClient;
-import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Iterator;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 定期指标采集器。通过 HTTP 请求 MetricsServer 和 YARN RPC 客户端
- * 收集集群指标，计算衍生指标，最后存入 MetricsStore 和 MetricsDatabase。
+ * 定时采集器。
+ * 按配置间隔轮询 MetricsServer /metrics，将结果转换为 MetricsSnapshot 并存储。
  */
-public class MetricsCollector implements AutoCloseable {
+public class MetricsCollector {
 
     private static final Logger LOG = LoggerFactory.getLogger(MetricsCollector.class);
 
     private final String metricsServerUrl;
-    private final YarnClient yarnClient;
+    private final long collectIntervalMs;
     private final MetricsStore store;
     private final MetricsDatabase database;
-    private final long collectIntervalMs;
+    private final boolean nmEnabled;
     private final ScheduledExecutorService scheduler;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    private volatile MetricsSnapshot previousSnapshot;
+    private volatile boolean running = false;
+    private ScheduledFuture<?> collectFuture;
 
     /**
-     * @param metricsServerUrl  MetricsServer HTTP 地址（如 http://localhost:28080/metrics）
-     * @param yarnClient        YARN 客户端
-     * @param store             内存存储
-     * @param database          SQLite 持久化
+     * @param metricsServerUrl  MetricsServer 的 base URL（如 http://localhost:28080）
      * @param collectIntervalMs 采集间隔（毫秒）
+     * @param store             内存环形缓冲区
+     * @param database          SQLite 持久化层
      */
-    public MetricsCollector(String metricsServerUrl, YarnClient yarnClient,
-                            MetricsStore store, MetricsDatabase database,
-                            long collectIntervalMs) {
+    public MetricsCollector(String metricsServerUrl, long collectIntervalMs,
+                            MetricsStore store, MetricsDatabase database) {
+        this(metricsServerUrl, collectIntervalMs, store, database, true);
+    }
+
+    /**
+     * @param metricsServerUrl  MetricsServer 的 base URL（如 http://localhost:28080）
+     * @param collectIntervalMs 采集间隔（毫秒）
+     * @param store             内存环形缓冲区
+     * @param database          SQLite 持久化层
+     * @param nmEnabled         是否启用 NM 指标采集（false 时 start/collectOnce 直接返回）
+     */
+    public MetricsCollector(String metricsServerUrl, long collectIntervalMs,
+                            MetricsStore store, MetricsDatabase database, boolean nmEnabled) {
         this.metricsServerUrl = metricsServerUrl;
-        this.yarnClient = yarnClient;
+        this.collectIntervalMs = collectIntervalMs;
         this.store = store;
         this.database = database;
-        this.collectIntervalMs = collectIntervalMs;
-        this.objectMapper = new ObjectMapper();
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-
+        this.nmEnabled = nmEnabled;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "metrics-collector");
             t.setDaemon(true);
             return t;
         });
-
-        this.scheduler.scheduleAtFixedRate(this::collect,
-                0, collectIntervalMs, TimeUnit.MILLISECONDS);
-
-        LOG.info("MetricsCollector started: interval={}ms, serverUrl={}", collectIntervalMs, metricsServerUrl);
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+        this.objectMapper = new ObjectMapper();
     }
 
     /**
-     * 执行一次完整采集流程。
+     * 启动定时采集。
      */
-    void collect() {
-        try {
-            MetricsSnapshot snapshot = new MetricsSnapshot();
-
-            boolean metricsOk = pollMetricsServer(snapshot);
-            if (!metricsOk) {
-                LOG.warn("Metrics server poll failed, skipping this collection cycle");
-                return;
-            }
-            pollRMClient(snapshot);
-            computeDerivedMetrics(snapshot);
-
-            store.add(snapshot);
-            database.add(snapshot);
-
-            previousSnapshot = snapshot;
-
-            LOG.debug("Metrics collected: ts={}, nodes={}, allocContainers={}, activeApps={}",
-                    snapshot.getTimestamp(), snapshot.getTotalNodes(),
-                    snapshot.getTotalContainersAllocated(), snapshot.getActiveApplications());
-        } catch (Exception e) {
-            LOG.error("Error during metrics collection", e);
+    public void start() {
+        if (!nmEnabled) {
+            LOG.info("NM metrics collection disabled, MetricsCollector will not schedule");
+            return;
         }
+        if (running) {
+            LOG.warn("MetricsCollector is already running");
+            return;
+        }
+        running = true;
+        collectFuture = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                MetricsSnapshot snapshot = collectOnce();
+                if (snapshot != null) {
+                    store.add(snapshot);
+                    if (database != null) {
+                        database.insertBatch(java.util.Collections.singletonList(snapshot));
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Error during scheduled collection", e);
+            }
+        }, 0, collectIntervalMs, TimeUnit.MILLISECONDS);
+        LOG.info("MetricsCollector started: interval={}ms, target={}", collectIntervalMs, metricsServerUrl);
     }
 
     /**
-     * 从 MetricsServer 的 HTTP /metrics 接口拉取集群基础指标。
-     * @return true 如果采集成功，false 如果失败（跳过后续处理）
+     * 停止采集。
      */
-    boolean pollMetricsServer(MetricsSnapshot snapshot) {
+    public void stop() {
+        running = false;
+        if (collectFuture != null && !collectFuture.isCancelled()) {
+            collectFuture.cancel(false);
+        }
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(3, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        LOG.info("MetricsCollector stopped");
+    }
+
+    /**
+     * 是否正在运行。
+     */
+    public boolean isRunning() {
+        return running;
+    }
+
+    /**
+     * 单次采集（public 便于测试）。
+     * HTTP GET 请求 {metricsServerUrl}/metrics，解析 JSON 构建 MetricsSnapshot。
+     *
+     * @return 采集到的快照，或 null（失败时）
+     */
+    public MetricsSnapshot collectOnce() {
+        if (!nmEnabled) {
+            LOG.debug("NM metrics collection disabled, collectOnce returns null");
+            return null;
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(metricsServerUrl))
-                    .timeout(Duration.ofSeconds(5))
+                    .uri(URI.create(metricsServerUrl + "/metrics"))
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
@@ -117,238 +152,144 @@ public class MetricsCollector implements AutoCloseable {
                     HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                LOG.warn("Metrics server returned status: {}", response.statusCode());
-                return false;
+                LOG.warn("MetricsServer returned status {} for /metrics", response.statusCode());
+                return null;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
-
-            // cluster
-            JsonNode cluster = root.get("cluster");
-            if (cluster != null) {
-                if (cluster.has("totalNodes")) {
-                    snapshot.setTotalNodes(cluster.get("totalNodes").asInt());
-                }
-            }
-
-            // scheduling
-            JsonNode scheduling = root.get("scheduling");
-            if (scheduling != null) {
-                if (scheduling.has("totalContainersAllocated")) {
-                    snapshot.setTotalContainersAllocated(
-                            scheduling.get("totalContainersAllocated").asLong());
-                }
-                if (scheduling.has("totalContainersReleased")) {
-                    snapshot.setTotalContainersReleased(
-                            scheduling.get("totalContainersReleased").asLong());
-                }
-            }
-
-            // nodeHeartbeatMetrics
-            JsonNode nodeHeartbeatMetrics = root.get("nodeHeartbeatMetrics");
-            if (nodeHeartbeatMetrics != null && nodeHeartbeatMetrics.isObject()) {
-                long totalSuccess = 0;
-                long totalFailed = 0;
-                double avgLatencySum = 0;
-                long maxLatency = 0;
-                int nodeCount = 0;
-
-                Iterator<String> fieldNames = nodeHeartbeatMetrics.fieldNames();
-                while (fieldNames.hasNext()) {
-                    String nodeId = fieldNames.next();
-                    JsonNode nodeData = nodeHeartbeatMetrics.get(nodeId);
-                    if (nodeData == null) continue;
-
-                    if (nodeData.has("successfulHeartbeats")) {
-                        totalSuccess += nodeData.get("successfulHeartbeats").asLong();
-                    }
-                    if (nodeData.has("failedHeartbeats")) {
-                        totalFailed += nodeData.get("failedHeartbeats").asLong();
-                    }
-                    if (nodeData.has("avgHeartbeatDuration")) {
-                        avgLatencySum += nodeData.get("avgHeartbeatDuration").asDouble();
-                    }
-                    if (nodeData.has("maxHeartbeatDuration")) {
-                        long nodeMax = nodeData.get("maxHeartbeatDuration").asLong();
-                        if (nodeMax > maxLatency) {
-                            maxLatency = nodeMax;
-                        }
-                    }
-                    nodeCount++;
-                }
-
-                snapshot.setSuccessfulHeartbeats(totalSuccess);
-                snapshot.setFailedHeartbeats(totalFailed);
-                snapshot.setAvgHeartbeatLatency(nodeCount > 0 ? avgLatencySum / nodeCount : 0);
-                snapshot.setMaxHeartbeatLatency(maxLatency);
-            }
-
-            LOG.debug("Polled metrics server: nodes={}, containers={}/{}",
-                    snapshot.getTotalNodes(),
-                    snapshot.getTotalContainersAllocated(),
-                    snapshot.getTotalContainersReleased());
-
-            return true;
-
-        } catch (IOException e) {
-            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            LOG.warn("Failed to connect to metrics server at {}: {} (hint: verify hostname, check if MetricsServer on port 28080 is running)", metricsServerUrl, detail);
-            return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn("Metrics server poll interrupted");
-            return false;
+            return parseMetricsResponse(root);
+        } catch (Exception e) {
+            LOG.warn("Failed to collect metrics from {}: {}", metricsServerUrl + "/metrics", e.getMessage());
+            return null;
         }
     }
 
     /**
-     * 通过 YARN RPC 客户端获取应用和队列指标。
+     * 解析 MetricsServer /metrics 的 JSON 响应为 MetricsSnapshot。
+     *
+     * ⚠️ 已知限制：MetricsServer 当前仅输出 cluster/scheduling/applications/nodeHeartbeatMetrics
+     * 四个节点。以下字段 MetricsServer 不提供、永远为 0：
+     * - 集群资源（totalMemoryMB/totalVCores 等）
+     * - 队列调度数据（queueMetrics）
+     * - pendingContainers / reservedContainers / submittedApplications
+     * 后续需通过 YarnClient RPC（ResourceManagerMetricsCollector）补充第二数据源。
      */
-    void pollRMClient(MetricsSnapshot snapshot) {
-        // 获取应用统计
-        try {
-            List<ApplicationReport> apps = yarnClient.getApplications();
-            int active = 0;
-            int completed = 0;
-            int failed = 0;
-            int submitted = 0;
+    MetricsSnapshot parseMetricsResponse(JsonNode root) {
+        MetricsSnapshot snapshot = new MetricsSnapshot();
 
-            for (ApplicationReport app : apps) {
-                YarnApplicationState state = app.getYarnApplicationState();
-                switch (state) {
-                    case RUNNING:
-                    case ACCEPTED:
-                        active++;
-                        break;
-                    case FINISHED:
-                        completed++;
-                        break;
-                    case FAILED:
-                        failed++;
-                        break;
-                    case SUBMITTED:
-                    case NEW:
-                    case NEW_SAVING:
-                        submitted++;
-                        break;
-                    default:
-                        break;
-                }
-            }
-
-            snapshot.setActiveApplications(active);
-            snapshot.setCompletedApplications(completed);
-            snapshot.setFailedApplications(failed);
-            snapshot.setSubmittedApplications(submitted);
-
-            LOG.debug("Polled RM applications: active={}, completed={}, failed={}, submitted={}",
-                    active, completed, failed, submitted);
-        } catch (IOException | YarnException e) {
-            LOG.warn("Failed to get applications from RM", e);
+        // 时间戳
+        JsonNode timestampNode = root.get("timestamp");
+        if (timestampNode != null) {
+            snapshot.setTimestamp(timestampNode.asLong());
         }
 
-        // 获取队列信息
-        try {
-            List<QueueInfo> queues = yarnClient.getAllQueues();
-            if (queues != null && !queues.isEmpty()) {
-                // 使用第一个队列（通常为 default）
-                QueueInfo firstQueue = queues.get(0);
-                snapshot.setQueueName(firstQueue.getQueueName());
-                snapshot.setQueueUsedCapacity(firstQueue.getCurrentCapacity());
-                snapshot.setQueueAbsoluteCapacity(firstQueue.getCapacity());
-
-                // 队列中的应用数量
-                int pending = 0;
-                int activeInQueue = 0;
-                if (firstQueue.getApplications() != null) {
-                    for (ApplicationReport app : firstQueue.getApplications()) {
-                        YarnApplicationState state = app.getYarnApplicationState();
-                        switch (state) {
-                            case SUBMITTED:
-                            case NEW:
-                            case NEW_SAVING:
-                                pending++;
-                                break;
-                            case RUNNING:
-                            case ACCEPTED:
-                                activeInQueue++;
-                                break;
-                            default:
-                                break;
-                        }
-                    }
-                }
-                snapshot.setQueuePendingApps(pending);
-                snapshot.setQueueActiveApps(activeInQueue);
+        // cluster
+        JsonNode cluster = root.get("cluster");
+        if (cluster != null) {
+            JsonNode totalNodes = cluster.get("totalNodes");
+            if (totalNodes != null) {
+                snapshot.setTotalNodes(totalNodes.asInt());
             }
-        } catch (IOException | YarnException e) {
-            LOG.warn("Failed to get queue info from RM", e);
         }
+
+        // scheduling
+        JsonNode scheduling = root.get("scheduling");
+        if (scheduling != null) {
+            JsonNode allocated = scheduling.get("totalContainersAllocated");
+            if (allocated != null) {
+                snapshot.setTotalContainersAllocated(allocated.asLong());
+            }
+            JsonNode released = scheduling.get("totalContainersReleased");
+            if (released != null) {
+                snapshot.setTotalContainersReleased(released.asLong());
+            }
+        }
+
+        // 派生字段：activeContainers
+        snapshot.setActiveContainers(
+                snapshot.getTotalContainersAllocated() - snapshot.getTotalContainersReleased());
+
+        // applications
+        JsonNode applications = root.get("applications");
+        if (applications != null) {
+            JsonNode active = applications.get("active");
+            if (active != null) {
+                snapshot.setActiveApplications(active.asInt());
+            }
+            JsonNode completed = applications.get("completed");
+            if (completed != null) {
+                snapshot.setCompletedApplications(completed.asInt());
+            }
+            JsonNode failed = applications.get("failed");
+            if (failed != null) {
+                snapshot.setFailedApplications(failed.asInt());
+            }
+        }
+
+        // nodeHeartbeatMetrics — 汇总计算心跳指标
+        JsonNode nodeHeartbeatMetrics = root.get("nodeHeartbeatMetrics");
+        if (nodeHeartbeatMetrics != null && nodeHeartbeatMetrics.isObject()) {
+            parseHeartbeatMetrics(snapshot, nodeHeartbeatMetrics);
+        }
+
+        return snapshot;
     }
 
     /**
-     * 基于前后两次快照计算衍生指标：速率、成功率、吞吐量。
+     * 解析节点心跳指标，汇总计算全局心跳数据。
      */
-    void computeDerivedMetrics(MetricsSnapshot snapshot) {
-        MetricsSnapshot prev = previousSnapshot;
-        if (prev == null) {
-            snapshot.setHeartbeatSuccessRate(1.0);
-            snapshot.setContainerAllocateRate(0);
-            snapshot.setContainerReleaseRate(0);
-            snapshot.setHeartbeatThroughput(0);
-            return;
-        }
+    private void parseHeartbeatMetrics(MetricsSnapshot snapshot, JsonNode nodeHeartbeatMetrics) {
+        long totalSuccessful = 0;
+        long totalFailed = 0;
+        double sumAvgLatency = 0;
+        double maxLatency = 0;
+        int nodeCount = 0;
+        Map<String, MetricsSnapshot.NodeMetrics> nodeMetricsMap = new LinkedHashMap<>();
 
-        long timeDiff = snapshot.getTimestamp() - prev.getTimestamp();
-        double intervalSeconds = timeDiff / 1000.0;
+        Iterator<Map.Entry<String, JsonNode>> fields = nodeHeartbeatMetrics.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String nodeId = entry.getKey();
+            JsonNode nodeData = entry.getValue();
 
-        if (intervalSeconds <= 0) {
-            snapshot.setHeartbeatSuccessRate(1.0);
-            snapshot.setContainerAllocateRate(0);
-            snapshot.setContainerReleaseRate(0);
-            snapshot.setHeartbeatThroughput(0);
-            return;
-        }
+            long successful = nodeData.has("successfulHeartbeats") ? nodeData.get("successfulHeartbeats").asLong() : 0;
+            long failed = nodeData.has("failedHeartbeats") ? nodeData.get("failedHeartbeats").asLong() : 0;
+            long totalHb = nodeData.has("totalHeartbeats") ? nodeData.get("totalHeartbeats").asLong() : (successful + failed);
+            double avgLatency = nodeData.has("avgHeartbeatDuration") ? nodeData.get("avgHeartbeatDuration").asDouble() : 0;
+            double maxHbLatency = nodeData.has("maxHeartbeatDuration") ? nodeData.get("maxHeartbeatDuration").asDouble() : 0;
 
-        // 心跳成功率
-        long totalHb = snapshot.getSuccessfulHeartbeats() + snapshot.getFailedHeartbeats();
-        if (totalHb > 0) {
-            snapshot.setHeartbeatSuccessRate(
-                    (double) snapshot.getSuccessfulHeartbeats() / totalHb);
-        } else {
-            snapshot.setHeartbeatSuccessRate(1.0);
-        }
-
-        // 容器分配速率 (ops/s) — 使用 Math.max(0, diff) 防止计数器重置产生负值
-        long allocDiff = Math.max(0,
-                snapshot.getTotalContainersAllocated() - prev.getTotalContainersAllocated());
-        snapshot.setContainerAllocateRate(allocDiff / intervalSeconds);
-
-        // 容器释放速率 (ops/s)
-        long releaseDiff = Math.max(0,
-                snapshot.getTotalContainersReleased() - prev.getTotalContainersReleased());
-        snapshot.setContainerReleaseRate(releaseDiff / intervalSeconds);
-
-        // 心跳吞吐量 (ops/s)
-        long prevTotalHb = prev.getSuccessfulHeartbeats() + prev.getFailedHeartbeats();
-        long currTotalHb = snapshot.getSuccessfulHeartbeats() + snapshot.getFailedHeartbeats();
-        long hbDiff = Math.max(0, currTotalHb - prevTotalHb);
-        snapshot.setHeartbeatThroughput(hbDiff / intervalSeconds);
-    }
-
-    @Override
-    public void close() {
-        LOG.info("Stopping MetricsCollector");
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdown();
-            try {
-                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                scheduler.shutdownNow();
-                Thread.currentThread().interrupt();
+            totalSuccessful += successful;
+            totalFailed += failed;
+            sumAvgLatency += avgLatency;
+            if (maxHbLatency > maxLatency) {
+                maxLatency = maxHbLatency;
             }
+            nodeCount++;
+
+            // 构建节点指标
+            MetricsSnapshot.NodeMetrics nm = new MetricsSnapshot.NodeMetrics();
+            nm.setNodeId(nodeId);
+            nm.setTotalHeartbeats(totalHb);
+            nm.setSuccessfulHeartbeats(successful);
+            nm.setFailedHeartbeats(failed);
+            nm.setAvgLatencyMs(avgLatency);
+            nm.setMaxLatencyMs(maxHbLatency);
+            nodeMetricsMap.put(nodeId, nm);
         }
+
+        snapshot.setSuccessfulHeartbeats(totalSuccessful);
+        snapshot.setFailedHeartbeats(totalFailed);
+
+        long totalHeartbeats = totalSuccessful + totalFailed;
+        snapshot.setHeartbeatSuccessRate(
+                totalHeartbeats > 0 ? (double) totalSuccessful / totalHeartbeats * 100.0 : 100.0);
+
+        snapshot.setAvgHeartbeatLatencyMs(nodeCount > 0 ? sumAvgLatency / nodeCount : 0);
+        snapshot.setMaxHeartbeatLatencyMs(maxLatency);
+
+        // 吞吐量：总心跳数 / 采集间隔（假设为 5s），近似
+        snapshot.setHeartbeatThroughput(totalHeartbeats > 0 ? (double) totalHeartbeats / (collectIntervalMs / 1000.0) : 0);
+
+        snapshot.setNodeMetrics(nodeMetricsMap);
     }
 }

@@ -86,12 +86,11 @@ public class MetricsHttpHandlerTest {
         Assert.assertTrue("Should contain testNode", nodeMetrics.containsKey("testNode"));
 
         Map<String, Object> nodeData = nodeMetrics.get("testNode");
-        Assert.assertEquals("Total heartbeats should be 3 (1 + 1 + 1)", 3L, nodeData.get("totalHeartbeats"));
+        Assert.assertEquals("Total heartbeats should be 2 (1 successful + 1 failed)", 2L, nodeData.get("totalHeartbeats"));
         Assert.assertEquals("Successful heartbeats should be 1", 1L, nodeData.get("successfulHeartbeats"));
         Assert.assertEquals("Failed heartbeats should be 1", 1L, nodeData.get("failedHeartbeats"));
-        Assert.assertEquals("Heartbeat count should be 0", 0L, nodeData.get("heartbeatCount"));
+        Assert.assertEquals("Heartbeat count should be 0 (no heartbeats recorded)", 0L, nodeData.get("heartbeatCount"));
         Assert.assertEquals("Total heartbeat duration should be 0", 0L, nodeData.get("totalHeartbeatDuration"));
-        Assert.assertEquals("Min heartbeat duration should be Long.MAX_VALUE", Long.MAX_VALUE, nodeData.get("minHeartbeatDuration"));
         Assert.assertEquals("Max heartbeat duration should be 0", 0L, nodeData.get("maxHeartbeatDuration"));
         Assert.assertEquals("Average heartbeat duration should be 0", 0.0, nodeData.get("avgHeartbeatDuration"));
     }

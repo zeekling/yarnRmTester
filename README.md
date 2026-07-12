@@ -70,38 +70,45 @@ java -cp .:lib/*:config/* org.apache.hadoop.sls.SLSNodeManager /home/hadoop01/fa
 
 接下来就直接运行SLSRunner即可。例如：
 ```bash
-java -cp .:lib/* org.apache.hadoop.sls.SLSRunner /home/hadoop01/fakeNM/config/
+          java -cp .:lib/* org.apache.hadoop.sls.SLSRunner /home/hadoop01/fakeNM/config/
 ```
 
-## SLSMetrics 监控服务
+## SLSMetrics Web Dashboard 监控服务
 
-SLSMetrics 是一个独立运行的监控服务，用于对压测过程进行可视化监控和数据持久化。它不依赖 Fake NM 或 SLSRunner，可单独启动。
+SLSMetrics 是一个独立运行的 Web 监控服务，提供 ECharts 交互式仪表盘。它独立于 Fake NM 和 SLSRunner 进程，可单独启动。
 
 ### 架构
 
 ```
-MetricsCollector (定时采集)
-    |
-    ├─→ MetricsStore (内存环形缓冲区，容量由 yarn.metrics.store.size 控制)
-    ├─→ MetricsDatabase (SQLite 持久化)
-    |
-    ChartGenerator (定时生成 PNG 趋势图，间隔由 yarn.metrics.chart.interval 控制)
+用户浏览器                           SLSMetrics 进程(28081)           MetricsServer(28080)
+    │                                    │                              │
+    │--- GET / (ECharts Dashboard) ----→│                              │
+    │←--- index.html + dashboard.js ---│                              │
+    │                                    │                              │
+    │--- GET /api/metrics/current ------→│                              │
+    │                                    │--- GET /metrics -----------→│
+    │                                    │←--- JSON metrics ----------│
+    │                                    │(存入 RingBuffer + SQLite)   │
+    │←--- JSON current data -----------│                              │
+    │                                    │                              │
+    │--- GET /api/metrics/history ------→│                              │
+    │                                    │(从 RingBuffer/SQLite 查询)  │
+    │←--- JSON history data ----------│                              │
 ```
 
-- **MetricsCollector**：周期性从 MetricsServer HTTP API（默认 28080 端口）和 YARN RM RPC 采集指标数据。
-- **MetricsStore**：内存中的环形缓冲区，暂存最近的指标数据，供 ChartGenerator 使用。
-- **MetricsDatabase**：将指标数据写入 SQLite 数据库，支持按天数保留自动清理。
-- **ChartGenerator**：基于 JFreeChart 生成四种 PNG 趋势图：
-  - Container 趋势图
-  - 资源利用率趋势图
-  - 应用状态趋势图
-  - 心跳延迟趋势图
+- **MetricsCollector**：周期性从 MetricsServer HTTP API（默认 28080 端口）拉取 JSON 指标数据。
+- **MetricsStore**：内存 RingBuffer，暂存最近 N 条时序数据（默认 3600 条 ≈ 5 小时）。
+- **MetricsDatabase**：SQLite 持久化，每小时清理 7 天前的过期数据。
+- **MetricsApiHandler**：REST API 处理器 + 静态文件服务（ECharts 前端资源）。
+- **前端 Dashboard**：基于 ECharts 5.5.0 的 6 个交互式图表（含可用节点、可用资源、队列 Pending 容器条形图等） + 8 个 KPI 卡片（含 Pending 容器、Reserved 容器、已提交应用等） + 节点健康状态条（Active/Lost/Unhealthy/Decommissioned）。
 
-### 前置条件
+### 依赖关系
 
-- YARN RM 必须正常运行。
-- MetricsServer（内嵌在 SLSNodeManager 中，默认端口 28080）必须可访问。
-- 如需从 RM RPC 采集指标，需配置 core-site.xml / yarn-site.xml。
+| 组件 | 前置条件 |
+|------|---------|
+| SLSMetrics（Web Dashboard） | **必须**：SLSNodeManager（MetricsServer 28080 端口）正在运行 |
+| SLSNodeManager（Fake NM） | 必须连接到运行的 YARN RM |
+| SLSRunner（压测） | 可选，可在 Fake NM 运行后随时启动 |
 
 ### 配置项
 
@@ -110,10 +117,11 @@ SLSMetrics 的配置项以 `yarn.metrics.*` 为前缀，写在 `fake.properites`
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
 | `yarn.metrics.collect.interval` | 5000 | 指标采集间隔（毫秒） |
-| `yarn.metrics.chart.interval` | 30000 | 图表生成间隔（毫秒） |
-| `yarn.metrics.store.size` | 3600 | 内存环形缓冲区容量 |
-| `yarn.metrics.output.dir` | target/metrics | 图表输出目录 |
-| `yarn.metrics.server.url` | http://localhost:28080/metrics | MetricsServer HTTP 端点 |
+| `yarn.metrics.store.size` | 3600 | 内存环形缓冲区容量（条数） |
+| `yarn.metrics.server.url` | http://localhost:28080 | MetricsServer HTTP 端点（不带 /metrics 后缀） |
+| `yarn.metrics.nm.collect.enabled` | true | 是否启用从本地 NM MetricsServer 采集指标 |
+| `yarn.metrics.nm.url` | http://localhost:28080 | NM MetricsServer 采集地址 |
+| `yarn.metrics.web.port` | 28081 | Web Dashboard 监听端口 |
 | `yarn.metrics.db.path` | target/metrics/metrics.db | SQLite 数据库路径 |
 | `yarn.metrics.db.batch.size` | 10 | SQLite 批量写入条数 |
 | `yarn.metrics.db.retention.days` | 7 | 数据保留天数 |
@@ -121,30 +129,40 @@ SLSMetrics 的配置项以 `yarn.metrics.*` 为前缀，写在 `fake.properites`
 
 ### 运行方式
 
-**使用启动脚本：**
-
-Windows：
+**先启动 SLSNodeManager：**
 ```bash
-start-metrics.bat [config_dir]
+java -cp "target/lib/*;target/classes" org.apache.hadoop.sls.SLSNodeManager <config_dir>
 ```
 
-Linux / Mac：
+**再启动 SLSMetrics Web Dashboard（新终端）：**
+
+使用启动脚本（推荐）：
 ```bash
-chmod +x start-metrics.sh
-./start-metrics.sh [config_dir]
+start-metrics.bat [config_dir]      # Windows
+./start-metrics.sh [config_dir]     # Linux / Mac
 ```
 
-**直接运行：**
+直接运行：
 ```bash
 java -cp "target/lib/*;target/classes" org.apache.hadoop.sls.metrics.SLSMetrics [config_dir]
 ```
 
-`config_dir` 为可选参数，默认为 `src/main/resources`，目录内需包含 `fake.properites` 及必要的 XML 配置文件。
+`config_dir` 默认为 `src/main/resources`，需包含 `fake.properites` 及 XML 配置文件。
+
+### 访问
+
+在浏览器打开 `http://localhost:28081` 即可查看 ECharts 仪表盘。
 
 ### 输出
 
-- **SQLite 数据库**：`target/metrics/metrics.db`，包含历史指标数据。
-- **PNG 趋势图**：`target/metrics/` 目录下定时生成四种趋势图。
-- 指标分为五类：集群资源、Container 调度、应用状态、心跳统计、队列统计。
+| 输出 | 说明 |
+|------|------|
+| **Web UI** | 浏览器访问 `http://localhost:28081`，自动刷新（10s 间隔） |
+| **SQLite 数据库** | `target/metrics/metrics.db`，5 张表持续写入 |
+| **API 端点** | `GET /api/metrics/current`、`/history`、`/nodes`、`/queue` |
+
+### ⚠️ 已知限制
+
+- 目前监控系统已通过 RM JMX 解决了集群资源利用率和队列状态的采集问题，KPI 卡片和图表已正常显示数据。
 
 

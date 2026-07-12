@@ -1,8 +1,11 @@
 package org.apache.hadoop.sls.metrics;
 
+import java.util.Map;
+
 /**
- * 单次指标采集快照 POJO。
- * 包含集群资源、容器调度、应用调度、心跳、队列等全部指标字段。
+ * 单次采集的数据快照 POJO。
+ * 包含集群资源、容器调度、应用状态、心跳指标、队列详情和节点详情。
+ * 所有字段通过构造方法或 setter 赋值，不涉及业务逻辑。
  */
 public class MetricsSnapshot {
 
@@ -11,14 +14,16 @@ public class MetricsSnapshot {
 
     // ========== 集群资源 ==========
     private int totalNodes;
-    private long totalMemory;
+    private int lostNodes;
+    private int unhealthyNodes;
+    private int decommissionedNodes;
+    private long totalMemoryMB;
     private int totalVCores;
-    private long allocatedMemory;
+    private long allocatedMemoryMB;
     private int allocatedVCores;
-    private long availableMemory;
+    private long availableMemoryMB;
     private int availableVCores;
-    private double clusterMemoryUtilization;
-    private double clusterVCoreUtilization;
+    private double clusterUtilizationPercent;
 
     // ========== 容器调度 ==========
     private long totalContainersAllocated;
@@ -26,29 +31,26 @@ public class MetricsSnapshot {
     private long activeContainers;
     private int pendingContainers;
     private int reservedContainers;
-    private double containerAllocateRate;
-    private double containerReleaseRate;
 
-    // ========== 应用调度 ==========
+    // ========== 应用状态 ==========
     private int activeApplications;
     private int completedApplications;
     private int failedApplications;
     private int submittedApplications;
 
-    // ========== 心跳 ==========
+    // ========== 心跳指标 ==========
     private long successfulHeartbeats;
     private long failedHeartbeats;
     private double heartbeatSuccessRate;
-    private double avgHeartbeatLatency;
-    private long maxHeartbeatLatency;
+    private double avgHeartbeatLatencyMs;
+    private double maxHeartbeatLatencyMs;
     private double heartbeatThroughput;
 
-    // ========== 队列 ==========
-    private String queueName;
-    private double queueUsedCapacity;
-    private double queueAbsoluteCapacity;
-    private int queuePendingApps;
-    private int queueActiveApps;
+    // ========== 队列数据 ==========
+    private Map<String, QueueMetrics> queueMetrics;
+
+    // ========== 节点详情 ==========
+    private Map<String, NodeMetrics> nodeMetrics;
 
     /** 默认构造器，timestamp 设为当前系统时间 */
     public MetricsSnapshot() {
@@ -73,12 +75,36 @@ public class MetricsSnapshot {
         this.totalNodes = totalNodes;
     }
 
-    public long getTotalMemory() {
-        return totalMemory;
+    public int getLostNodes() {
+        return lostNodes;
     }
 
-    public void setTotalMemory(long totalMemory) {
-        this.totalMemory = totalMemory;
+    public void setLostNodes(int lostNodes) {
+        this.lostNodes = lostNodes;
+    }
+
+    public int getUnhealthyNodes() {
+        return unhealthyNodes;
+    }
+
+    public void setUnhealthyNodes(int unhealthyNodes) {
+        this.unhealthyNodes = unhealthyNodes;
+    }
+
+    public int getDecommissionedNodes() {
+        return decommissionedNodes;
+    }
+
+    public void setDecommissionedNodes(int decommissionedNodes) {
+        this.decommissionedNodes = decommissionedNodes;
+    }
+
+    public long getTotalMemoryMB() {
+        return totalMemoryMB;
+    }
+
+    public void setTotalMemoryMB(long totalMemoryMB) {
+        this.totalMemoryMB = totalMemoryMB;
     }
 
     public int getTotalVCores() {
@@ -89,12 +115,12 @@ public class MetricsSnapshot {
         this.totalVCores = totalVCores;
     }
 
-    public long getAllocatedMemory() {
-        return allocatedMemory;
+    public long getAllocatedMemoryMB() {
+        return allocatedMemoryMB;
     }
 
-    public void setAllocatedMemory(long allocatedMemory) {
-        this.allocatedMemory = allocatedMemory;
+    public void setAllocatedMemoryMB(long allocatedMemoryMB) {
+        this.allocatedMemoryMB = allocatedMemoryMB;
     }
 
     public int getAllocatedVCores() {
@@ -105,12 +131,12 @@ public class MetricsSnapshot {
         this.allocatedVCores = allocatedVCores;
     }
 
-    public long getAvailableMemory() {
-        return availableMemory;
+    public long getAvailableMemoryMB() {
+        return availableMemoryMB;
     }
 
-    public void setAvailableMemory(long availableMemory) {
-        this.availableMemory = availableMemory;
+    public void setAvailableMemoryMB(long availableMemoryMB) {
+        this.availableMemoryMB = availableMemoryMB;
     }
 
     public int getAvailableVCores() {
@@ -121,20 +147,12 @@ public class MetricsSnapshot {
         this.availableVCores = availableVCores;
     }
 
-    public double getClusterMemoryUtilization() {
-        return clusterMemoryUtilization;
+    public double getClusterUtilizationPercent() {
+        return clusterUtilizationPercent;
     }
 
-    public void setClusterMemoryUtilization(double clusterMemoryUtilization) {
-        this.clusterMemoryUtilization = clusterMemoryUtilization;
-    }
-
-    public double getClusterVCoreUtilization() {
-        return clusterVCoreUtilization;
-    }
-
-    public void setClusterVCoreUtilization(double clusterVCoreUtilization) {
-        this.clusterVCoreUtilization = clusterVCoreUtilization;
+    public void setClusterUtilizationPercent(double clusterUtilizationPercent) {
+        this.clusterUtilizationPercent = clusterUtilizationPercent;
     }
 
     public long getTotalContainersAllocated() {
@@ -175,22 +193,6 @@ public class MetricsSnapshot {
 
     public void setReservedContainers(int reservedContainers) {
         this.reservedContainers = reservedContainers;
-    }
-
-    public double getContainerAllocateRate() {
-        return containerAllocateRate;
-    }
-
-    public void setContainerAllocateRate(double containerAllocateRate) {
-        this.containerAllocateRate = containerAllocateRate;
-    }
-
-    public double getContainerReleaseRate() {
-        return containerReleaseRate;
-    }
-
-    public void setContainerReleaseRate(double containerReleaseRate) {
-        this.containerReleaseRate = containerReleaseRate;
     }
 
     public int getActiveApplications() {
@@ -249,20 +251,20 @@ public class MetricsSnapshot {
         this.heartbeatSuccessRate = heartbeatSuccessRate;
     }
 
-    public double getAvgHeartbeatLatency() {
-        return avgHeartbeatLatency;
+    public double getAvgHeartbeatLatencyMs() {
+        return avgHeartbeatLatencyMs;
     }
 
-    public void setAvgHeartbeatLatency(double avgHeartbeatLatency) {
-        this.avgHeartbeatLatency = avgHeartbeatLatency;
+    public void setAvgHeartbeatLatencyMs(double avgHeartbeatLatencyMs) {
+        this.avgHeartbeatLatencyMs = avgHeartbeatLatencyMs;
     }
 
-    public long getMaxHeartbeatLatency() {
-        return maxHeartbeatLatency;
+    public double getMaxHeartbeatLatencyMs() {
+        return maxHeartbeatLatencyMs;
     }
 
-    public void setMaxHeartbeatLatency(long maxHeartbeatLatency) {
-        this.maxHeartbeatLatency = maxHeartbeatLatency;
+    public void setMaxHeartbeatLatencyMs(double maxHeartbeatLatencyMs) {
+        this.maxHeartbeatLatencyMs = maxHeartbeatLatencyMs;
     }
 
     public double getHeartbeatThroughput() {
@@ -273,43 +275,274 @@ public class MetricsSnapshot {
         this.heartbeatThroughput = heartbeatThroughput;
     }
 
+    public Map<String, QueueMetrics> getQueueMetrics() {
+        return queueMetrics;
+    }
+
+    public void setQueueMetrics(Map<String, QueueMetrics> queueMetrics) {
+        this.queueMetrics = queueMetrics;
+    }
+
+    public Map<String, NodeMetrics> getNodeMetrics() {
+        return nodeMetrics;
+    }
+
+    public void setNodeMetrics(Map<String, NodeMetrics> nodeMetrics) {
+        this.nodeMetrics = nodeMetrics;
+    }
+
+    // ======================== 向后兼容的旧 API 桥接 ========================
+
+    /** @deprecated 使用 getTotalMemoryMB() 替代 */
+    @Deprecated
+    public long getTotalMemory() {
+        return totalMemoryMB;
+    }
+
+    /** @deprecated 使用 setTotalMemoryMB(long) 替代 */
+    @Deprecated
+    public void setTotalMemory(long totalMemory) {
+        this.totalMemoryMB = totalMemory;
+    }
+
+    /** @deprecated 使用 getAllocatedMemoryMB() 替代 */
+    @Deprecated
+    public long getAllocatedMemory() {
+        return allocatedMemoryMB;
+    }
+
+    /** @deprecated 使用 setAllocatedMemoryMB(long) 替代 */
+    @Deprecated
+    public void setAllocatedMemory(long allocatedMemory) {
+        this.allocatedMemoryMB = allocatedMemory;
+    }
+
+    /** @deprecated 使用 getAvailableMemoryMB() 替代 */
+    @Deprecated
+    public long getAvailableMemory() {
+        return availableMemoryMB;
+    }
+
+    /** @deprecated 使用 setAvailableMemoryMB(long) 替代 */
+    @Deprecated
+    public void setAvailableMemory(long availableMemory) {
+        this.availableMemoryMB = availableMemory;
+    }
+
+    /** @deprecated 使用 getClusterUtilizationPercent() 替代 */
+    @Deprecated
+    public double getClusterMemoryUtilization() {
+        return clusterUtilizationPercent;
+    }
+
+    /** @deprecated 使用 setClusterUtilizationPercent(double) 替代 */
+    @Deprecated
+    public void setClusterMemoryUtilization(double utilization) {
+        this.clusterUtilizationPercent = utilization;
+    }
+
+    /** @deprecated 不再使用 vCore 独立利用率，统一使用 clusterUtilizationPercent */
+    @Deprecated
+    public double getClusterVCoreUtilization() {
+        return clusterUtilizationPercent;
+    }
+
+    /** @deprecated 不再使用 vCore 独立利用率 */
+    @Deprecated
+    public void setClusterVCoreUtilization(double utilization) {
+        this.clusterUtilizationPercent = utilization;
+    }
+
+    /** @deprecated 使用 getQueueMetrics() 替代，返回第一个队列的队列名 */
+    @Deprecated
     public String getQueueName() {
-        return queueName;
+        if (queueMetrics == null || queueMetrics.isEmpty()) return null;
+        return queueMetrics.values().iterator().next().getQueueName();
     }
 
+    /** @deprecated 不再支持单个队列名 */
+    @Deprecated
     public void setQueueName(String queueName) {
-        this.queueName = queueName;
+        // no-op, use setQueueMetrics instead
     }
 
+    /** @deprecated 使用 getQueueMetrics() 替代 */
+    @Deprecated
     public double getQueueUsedCapacity() {
-        return queueUsedCapacity;
+        if (queueMetrics == null || queueMetrics.isEmpty()) return 0.0;
+        return queueMetrics.values().iterator().next().getUsedCapacity();
     }
 
-    public void setQueueUsedCapacity(double queueUsedCapacity) {
-        this.queueUsedCapacity = queueUsedCapacity;
+    /** @deprecated 使用 setQueueMetrics(Map) 替代 */
+    @Deprecated
+    public void setQueueUsedCapacity(double usedCapacity) {
+        // no-op, use setQueueMetrics instead
     }
 
+    /** @deprecated 使用 getQueueMetrics() 替代 */
+    @Deprecated
     public double getQueueAbsoluteCapacity() {
-        return queueAbsoluteCapacity;
+        if (queueMetrics == null || queueMetrics.isEmpty()) return 0.0;
+        return queueMetrics.values().iterator().next().getAbsoluteCapacity();
     }
 
-    public void setQueueAbsoluteCapacity(double queueAbsoluteCapacity) {
-        this.queueAbsoluteCapacity = queueAbsoluteCapacity;
+    /** @deprecated 使用 setQueueMetrics(Map) 替代 */
+    @Deprecated
+    public void setQueueAbsoluteCapacity(double absoluteCapacity) {
+        // no-op, use setQueueMetrics instead
     }
 
+    /** @deprecated 使用 getQueueMetrics() 替代 */
+    @Deprecated
     public int getQueuePendingApps() {
-        return queuePendingApps;
+        if (queueMetrics == null || queueMetrics.isEmpty()) return 0;
+        return queueMetrics.values().iterator().next().getPendingApps();
     }
 
-    public void setQueuePendingApps(int queuePendingApps) {
-        this.queuePendingApps = queuePendingApps;
+    /** @deprecated 使用 setQueueMetrics(Map) 替代 */
+    @Deprecated
+    public void setQueuePendingApps(int pendingApps) {
+        // no-op, use setQueueMetrics instead
     }
 
+    /** @deprecated 使用 getQueueMetrics() 替代 */
+    @Deprecated
     public int getQueueActiveApps() {
-        return queueActiveApps;
+        if (queueMetrics == null || queueMetrics.isEmpty()) return 0;
+        return queueMetrics.values().iterator().next().getActiveApps();
     }
 
-    public void setQueueActiveApps(int queueActiveApps) {
-        this.queueActiveApps = queueActiveApps;
+    /** @deprecated 使用 setQueueMetrics(Map) 替代 */
+    @Deprecated
+    public void setQueueActiveApps(int activeApps) {
+        // no-op, use setQueueMetrics instead
+    }
+
+    // ======================== 内部类 ========================
+
+    /**
+     * 队列指标。
+     */
+    public static class QueueMetrics {
+        private String queueName;
+        private double absoluteCapacity;
+        private double usedCapacity;
+        private int pendingApps;
+        private int activeApps;
+        private int pendingContainers;
+
+        public QueueMetrics() {
+        }
+
+        public String getQueueName() {
+            return queueName;
+        }
+
+        public void setQueueName(String queueName) {
+            this.queueName = queueName;
+        }
+
+        public double getAbsoluteCapacity() {
+            return absoluteCapacity;
+        }
+
+        public void setAbsoluteCapacity(double absoluteCapacity) {
+            this.absoluteCapacity = absoluteCapacity;
+        }
+
+        public double getUsedCapacity() {
+            return usedCapacity;
+        }
+
+        public void setUsedCapacity(double usedCapacity) {
+            this.usedCapacity = usedCapacity;
+        }
+
+        public int getPendingApps() {
+            return pendingApps;
+        }
+
+        public void setPendingApps(int pendingApps) {
+            this.pendingApps = pendingApps;
+        }
+
+        public int getActiveApps() {
+            return activeApps;
+        }
+
+        public void setActiveApps(int activeApps) {
+            this.activeApps = activeApps;
+        }
+
+        public int getPendingContainers() {
+            return pendingContainers;
+        }
+
+        public void setPendingContainers(int pendingContainers) {
+            this.pendingContainers = pendingContainers;
+        }
+    }
+
+    /**
+     * 节点指标。
+     */
+    public static class NodeMetrics {
+        private String nodeId;
+        private long totalHeartbeats;
+        private long successfulHeartbeats;
+        private long failedHeartbeats;
+        private double avgLatencyMs;
+        private double maxLatencyMs;
+
+        public NodeMetrics() {
+        }
+
+        public String getNodeId() {
+            return nodeId;
+        }
+
+        public void setNodeId(String nodeId) {
+            this.nodeId = nodeId;
+        }
+
+        public long getTotalHeartbeats() {
+            return totalHeartbeats;
+        }
+
+        public void setTotalHeartbeats(long totalHeartbeats) {
+            this.totalHeartbeats = totalHeartbeats;
+        }
+
+        public long getSuccessfulHeartbeats() {
+            return successfulHeartbeats;
+        }
+
+        public void setSuccessfulHeartbeats(long successfulHeartbeats) {
+            this.successfulHeartbeats = successfulHeartbeats;
+        }
+
+        public long getFailedHeartbeats() {
+            return failedHeartbeats;
+        }
+
+        public void setFailedHeartbeats(long failedHeartbeats) {
+            this.failedHeartbeats = failedHeartbeats;
+        }
+
+        public double getAvgLatencyMs() {
+            return avgLatencyMs;
+        }
+
+        public void setAvgLatencyMs(double avgLatencyMs) {
+            this.avgLatencyMs = avgLatencyMs;
+        }
+
+        public double getMaxLatencyMs() {
+            return maxLatencyMs;
+        }
+
+        public void setMaxLatencyMs(double maxLatencyMs) {
+            this.maxLatencyMs = maxLatencyMs;
+        }
     }
 }

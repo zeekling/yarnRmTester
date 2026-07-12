@@ -35,21 +35,13 @@ public class MetricsSnapshotTest {
 
     public void testSetAndGetContainerMetrics() {
         MetricsSnapshot snapshot = new MetricsSnapshot();
-        snapshot.setTotalContainersAllocated(1000L);
-        snapshot.setTotalContainersReleased(400L);
         snapshot.setActiveContainers(600L);
         snapshot.setPendingContainers(5);
         snapshot.setReservedContainers(2);
-        snapshot.setContainerAllocateRate(10.5);
-        snapshot.setContainerReleaseRate(8.3);
 
-        Assert.assertEquals(1000L, snapshot.getTotalContainersAllocated());
-        Assert.assertEquals(400L, snapshot.getTotalContainersReleased());
         Assert.assertEquals(600L, snapshot.getActiveContainers());
         Assert.assertEquals(5, snapshot.getPendingContainers());
         Assert.assertEquals(2, snapshot.getReservedContainers());
-        Assert.assertEquals(10.5, snapshot.getContainerAllocateRate());
-        Assert.assertEquals(8.3, snapshot.getContainerReleaseRate());
     }
 
     public void testSetAndGetApplicationMetrics() {
@@ -65,30 +57,17 @@ public class MetricsSnapshotTest {
         Assert.assertEquals(27, snapshot.getSubmittedApplications());
     }
 
-    public void testSetAndGetHeartbeatMetrics() {
-        MetricsSnapshot snapshot = new MetricsSnapshot();
-        snapshot.setSuccessfulHeartbeats(500L);
-        snapshot.setFailedHeartbeats(3L);
-        snapshot.setHeartbeatSuccessRate(0.994);
-        snapshot.setAvgHeartbeatLatency(12.5);
-        snapshot.setMaxHeartbeatLatency(150L);
-        snapshot.setHeartbeatThroughput(100.0);
-
-        Assert.assertEquals(500L, snapshot.getSuccessfulHeartbeats());
-        Assert.assertEquals(3L, snapshot.getFailedHeartbeats());
-        Assert.assertEquals(0.994, snapshot.getHeartbeatSuccessRate());
-        Assert.assertEquals(12.5, snapshot.getAvgHeartbeatLatency());
-        Assert.assertEquals(150L, snapshot.getMaxHeartbeatLatency());
-        Assert.assertEquals(100.0, snapshot.getHeartbeatThroughput());
-    }
-
     public void testSetAndGetQueueMetrics() {
         MetricsSnapshot snapshot = new MetricsSnapshot();
-        snapshot.setQueueName("default");
-        snapshot.setQueueUsedCapacity(0.5);
-        snapshot.setQueueAbsoluteCapacity(0.3);
-        snapshot.setQueuePendingApps(2);
-        snapshot.setQueueActiveApps(3);
+        MetricsSnapshot.QueueMetrics qm = new MetricsSnapshot.QueueMetrics();
+        qm.setQueueName("default");
+        qm.setUsedCapacity(0.5);
+        qm.setAbsoluteCapacity(0.3);
+        qm.setPendingApps(2);
+        qm.setActiveApps(3);
+        java.util.Map<String, MetricsSnapshot.QueueMetrics> queueMap = new java.util.LinkedHashMap<>();
+        queueMap.put("default", qm);
+        snapshot.setQueueMetrics(queueMap);
 
         Assert.assertEquals("default", snapshot.getQueueName());
         Assert.assertEquals(0.5, snapshot.getQueueUsedCapacity());

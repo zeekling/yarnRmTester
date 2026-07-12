@@ -508,5 +508,198 @@ completion_checklist:
 
 ---
 
-**文档版本**：v1.0
-**最后更新**：2026-07-12
+---
+
+## 6. 优化迭代 v2.0 —— 基于 SLSMetrics 执行复盘的新发现
+
+**设计日期**：2026-07-12
+**版本**：v2.0
+**触发场景**：SLSMetrics Web Dashboard 全链路执行复盘
+
+### 6.1 背景
+
+SLSMetrics 项目完整执行一次 PuaSE 编排循环（设计 → 开发 → 审查 → 修复 → 验收）。复盘发现：§A-§E 规则全部存在于 AGENTS.md 中，但**落地率为 0%**——没有一条规则被实际执行。同时发现 security-expert 探活机制失效、状态机不完整等问题。
+
+### 6.2 优化一：§A-§E 落地率保证（P0）
+
+**问题**：§A-§E 规则在之前的设计文档和 AGENTS.md 中均有详细定义，但 SLSMetrics 执行中全部未遵守。
+
+**根因**：规则以被动文档形式存在，缺乏主动行为保障。
+
+**解决策略**：不再依赖外部约束加载，改为 PuaSE **内化承诺**。§A-§E 是编排者身份的一部分，不是外部要求。
+
+| § | 规则 | 执行承诺 | 验证方式 |
+|---|------|---------|---------|
+| §A | 委派前输出 `[Pre-Check]` 格式 | 每次委派前执行 5 项检查并输出日志 | 用户可见的 `[Pre-Check]` 块 |
+| §B | 委派后 3s 验证 TODO 一致性 | 每次委派后 3s 内检查状态 | TODO 状态与实际一致 |
+| §C | 状态转换门禁 | 禁止无委派记录的 `in_progress` | 无虚假状态 |
+| §D | 5s 自动检测循环 | 委托后启动循环（最多 3 次、总 35s） | 卡住时自动恢复 |
+| §E-2 | 批量汇报 | 每 3-5 Task 批量汇报而非逐个 | 消息数降低 ≥60% |
+| §E-4 | 自动压缩 | 每个 Task 完成后即压缩相关部分 | context 保持在 <50% |
+
+### 6.3 优化二：Agent 探活增强（P0）
+
+**问题**：security-expert 连续 2 次委派返回空（no response），按 §5.2 进入 L2 熔断 → PuaSE 人工代检。当前 §5.5 的探活方式（文件存在性 + 轻量消息发送）无法检测"能响应消息但不能返回审计结果"的故障。
+
+**解决**：三层探活机制
+
+```yaml
+health_check_v2:
+  levels:
+    L1: # 文件存在性检查（快速）
+      check: "Agent prompt 文件是否存在且可读"
+      cost: ~0s
+      pass: "进入 L2"
+      fail: "标记不可用，发警告"
+
+    L2: # 消息往返检查（中速）
+      probe: "通过 task/delegate 发送轻量消息"
+      expected: "Agent 返回有效响应（非空）"
+      timeout: 5000ms
+      pass: "进入 L3"
+      fail: "重试 1 次，再失败 → 标记不可用"
+
+    L3: # 功能性探活（完整）
+      description: "对 key subagent（security-expert、quality-inspector），
+                    在会话启动时发一条真实的审计任务验证能返回有效审计结果"
+      probe_task: "发送简单审计 prompt（如'检查类 X 的 SQL 注入风险'）"
+      expected: "返回包含具体审计发现的非空结果"
+      timeout: 15000ms
+      pass: "Agent 就绪"
+      fail: "标记为 degraded，触发降级预案"
+```
+
+**降级预案**：
+- security-expert 不可用 → 加载 `manual-security-audit-checklist.md`，PuaSE 自查
+- quality-inspector 不可用 → 逐项自检（按 QI-ARC→QI-DEV→QI-BIG→QI-SEC→QI-DBA→QI-DOC 顺序）
+- 探活结果缓存 300s，避免重复探测
+
+### 6.4 优化三：technical_failure 状态追加（P0）
+
+**问题**：当前状态机只有 `pending → in_progress → completed/pending/skipped/blocked`。但"委派成功但返回空"或"Agent 超时"不属于任何一种现有状态：
+- 不是 `pending`（已经委派了）
+- 不是 `completed`（没有有效结果）
+- 不是 `pending`（不是质量打回）
+- 不是 `skipped`（确实尝试执行了）
+- 不是 `blocked`（依赖没问题）
+
+将技术故障和质量打回混为一谈导致：security-expert 空返被当做"打回"处理，触发了 L2 升级，而实际上应该先重试。
+
+**解决**：追加 `technical_failure` 状态到状态机
+
+```
+新状态转换：
+  in_progress ──→ technical_failure  ← 新增
+      条件：Agent 返回空/超时/格式错误/不可解析
+      处理：自动重试（最多 3 次，指数退避）
+            重试成功 → completed
+            重试 3 次失败 → L1 升级
+            L1 失败（换 Agent）→ L2 熔断
+```
+
+**更新状态转换矩阵**：
+
+| 从 → 到 | 条件 | 禁止条件 |
+|---------|------|---------|
+| `pending` → `in_progress` | 委派已启动 | 无委派记录 |
+| `in_progress` → `completed` | Agent 返回通过验收 | 无验证结果 |
+| `in_progress` → `pending` | Agent 质量打回，附理由 | 无打回记录 |
+| **`in_progress` → `technical_failure`** | **Agent 返回空/超时/格式错误** | **有有效审计结果** |
+| `technical_failure` → `in_progress` | **重试启动** | **重试 >3 次** |
+| `in_progress` → `skipped` | 判定不适用 | 无跳过理由 |
+| `in_progress` → `blocked` | 前置依赖失败 | 依赖已完成 |
+
+**新增自动修正规则**：
+```
+5. 技术故障自动修正：
+   detect: "todo.status == 'in_progress' AND 
+            agent 返回结果为空/超时/格式错误"
+   fix:    "标记为 technical_failure → 自动重试
+            （最多 3 次，1s→2s→4s 指数退避）
+            重试成功 → 标记 completed
+            均失败 → L1 升级换 Agent"
+   notify: "重试中静默，连续失败时通知"
+```
+
+**状态转换总图**：
+
+```
+                    ┌──────────────────────────────────┐
+                    │           pending                │
+                    └──────┬───────────────────────────┘
+                           │ 委派启动
+                           ▼
+                    ┌──────────────────────────────────┐
+                    │         in_progress              │
+                    └──┬──────┬──────────┬─────────────┘
+                       │      │          │
+            Agent返回  │  Agent打回  │  返回空/超时
+           通过验收     │  附理由      │  (技术故障)
+                       ▼      ▼          ▼
+               ┌──────┐ ┌──────┐ ┌──────────────┐
+               │compl.│ │pend. │ │tech_failure  │
+               └──────┘ └──────┘ └──────┬───────┘
+                                        │ 重试（≤3次）
+                                        │ 成功 → completed
+                                        │ 全失败 → L1升级
+                                        ▼
+                                  ┌──────────┐
+                                  │ L1 换Agent│
+                                  └──────────┘
+```
+
+## 7. Anti-Familiarity-Bias Enforcement（防熟悉度偏误强执）
+
+### 7.1 问题复现
+
+2026-07-12 实际执行 JMX 双源采集任务时，PuaSE 在已完整阅读所有相关代码后，
+**直接 write 了 JmxMetricsCollector.java**，未做委派、未输出自执行归因宣言。
+
+### 7.2 根因
+
+```
+熟悉度偏误："代码已经在脑子里了，委派出去还要重传上下文，太慢"
+     ↓
+上下文隔离原则被跳过："就写一个文件而已"
+     ↓
+自执行归因宣言被跳过："写完再补"
+     ↓
+最终：P8 自检钩子失效
+```
+
+### 7.3 强执机制（PuaSE 内化，不依赖文件存储）
+
+在每次调用 write/edit 工具前，PuaSE 必须执行以下三步自检：
+
+```
+[Pre-Write Self-Check]
+① 检查：当前操作是否涉及写文件？
+   → 否 → 通过（搜索/读取类操作豁免）
+   → 是 → 进入 ②
+
+② 检查：是否有对应的子 Agent 可承担此工作？
+   → 否 → 输出自执行归因宣言后继续
+   → 是 → 进入 ③
+
+③ 检查："直接改更快"的想法是否出现了？
+   → 否 → 输出自执行归因宣言后继续
+   → 是 → 必须委派，禁止自执行
+
+输出格式（任一命中时输出）：
+【Pre-Write Self-Check】涉及文件：<路径>
+对应子 Agent：<有/无> | 熟悉度偏误风险：<是/否>
+裁决：→ □ 委派 / □ 自执行（附归因宣言）
+```
+
+### 7.4 违反后果
+
+| 违规情形 | 后果 |
+|---------|------|
+| 未输出 Pre-Write Self-Check 直接写文件 | P0 违规，需立即中止并在 KPI 卡中标记 ⚠️ |
+| 子Agent存在但未委派 | 等同 P0 违规，KPI 卡标记 ❌ |
+| 归因宣言已输出但未遵守 | 等同 P0 违规，触发 reflector 复盘 |
+
+---
+
+**文档版本**：v2.1
+**最后更新**：2026-07-12（追加 §7 Anti-Familiarity-Bias Enforcement）

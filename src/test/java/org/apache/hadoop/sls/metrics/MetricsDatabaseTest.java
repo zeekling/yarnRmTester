@@ -9,43 +9,52 @@ import junit.framework.Assert;
 public class MetricsDatabaseTest {
 
     public void testDatabaseInitialization() {
-        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7, 3600000);
+        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7);
         // Should not throw - tables created on init
+        try {
+            db.init();
+        } catch (Exception e) {
+            junit.framework.Assert.fail("Database initialization failed: " + e.getMessage());
+        }
         db.close();
     }
 
     public void testInsertAndFlushSingleSnapshot() {
-        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7, 3600000);
+        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7);
+        try {
+            db.init();
+        } catch (Exception e) {
+            junit.framework.Assert.fail("Database initialization failed: " + e.getMessage());
+        }
 
         MetricsSnapshot snapshot = new MetricsSnapshot();
+        snapshot.setTimestamp(System.currentTimeMillis());
         snapshot.setTotalNodes(10);
-        snapshot.setTotalMemory(102400L);
+        snapshot.setTotalMemoryMB(102400L);
         snapshot.setTotalVCores(200);
-        snapshot.setAllocatedMemory(51200L);
+        snapshot.setAllocatedMemoryMB(51200L);
         snapshot.setAllocatedVCores(100);
-        snapshot.setAvailableMemory(51200L);
+        snapshot.setAvailableMemoryMB(51200L);
         snapshot.setAvailableVCores(100);
-        snapshot.setTotalContainersAllocated(1000L);
-        snapshot.setTotalContainersReleased(400L);
         snapshot.setActiveContainers(600L);
         snapshot.setActiveApplications(5);
         snapshot.setCompletedApplications(20);
         snapshot.setFailedApplications(2);
         snapshot.setSubmittedApplications(27);
-        snapshot.setSuccessfulHeartbeats(500L);
-        snapshot.setFailedHeartbeats(3L);
 
-        // batch size is 10, so add won't auto-flush
-        db.add(snapshot);
-        // Force flush
-        db.flush();
+        // Use insertBatch
+        db.insertBatch(java.util.Collections.singletonList(snapshot));
         // Should complete without errors
         db.close();
     }
 
     public void testBatchAutoFlush() {
-        // batch size 2, so every 2nd add triggers flush
-        MetricsDatabase db = new MetricsDatabase(":memory:", 2, 7, 3600000);
+        MetricsDatabase db = new MetricsDatabase(":memory:", 2, 7);
+        try {
+            db.init();
+        } catch (Exception e) {
+            junit.framework.Assert.fail("Database initialization failed: " + e.getMessage());
+        }
 
         MetricsSnapshot s1 = new MetricsSnapshot();
         s1.setTimestamp(100L);
@@ -59,45 +68,49 @@ public class MetricsDatabaseTest {
         s3.setTimestamp(300L);
         s3.setTotalNodes(15);
 
-        // s1 and s2 should trigger auto-flush (batch=2)
-        db.add(s1);
-        db.add(s2);
-        // s3 stays in batch until flush or close
-        db.add(s3);
-        db.close(); // close triggers final flush
+        // Use insertBatch
+        db.insertBatch(java.util.Arrays.asList(s1, s2, s3));
+        db.close();
     }
 
     public void testMultipleInsertsNoErrors() {
-        MetricsDatabase db = new MetricsDatabase(":memory:", 5, 7, 3600000);
+        MetricsDatabase db = new MetricsDatabase(":memory:", 5, 7);
+        try {
+            db.init();
+        } catch (Exception e) {
+            junit.framework.Assert.fail("Database initialization failed: " + e.getMessage());
+        }
 
+        java.util.List<MetricsSnapshot> batch = new java.util.ArrayList<>();
         for (int i = 0; i < 12; i++) {
             MetricsSnapshot s = new MetricsSnapshot();
+            s.setTimestamp(i * 1000L);
             s.setTotalNodes(10);
-            s.setTotalMemory(102400L);
+            s.setTotalMemoryMB(102400L);
             s.setTotalVCores(200);
-            s.setAllocatedMemory(i * 1000L);
+            s.setAllocatedMemoryMB(i * 1000L);
             s.setAllocatedVCores(i * 10);
-            s.setAvailableMemory(102400L - i * 1000L);
+            s.setAvailableMemoryMB(102400L - i * 1000L);
             s.setAvailableVCores(200 - i * 10);
-            s.setTotalContainersAllocated(i * 100L);
-            s.setTotalContainersReleased(i * 50L);
             s.setActiveContainers(i * 50L);
             s.setActiveApplications(i);
             s.setCompletedApplications(i * 2);
             s.setFailedApplications(i / 2);
             s.setSubmittedApplications(i * 3);
-            s.setSuccessfulHeartbeats(i * 100L);
-            s.setFailedHeartbeats((long) i);
-            s.setQueueName("default");
-            db.add(s);
+            batch.add(s);
         }
-
+        db.insertBatch(batch);
         db.close();
     }
 
     public void testCloseWithoutData() {
         // Should handle close gracefully with no data
-        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7, 3600000);
+        MetricsDatabase db = new MetricsDatabase(":memory:", 10, 7);
+        try {
+            db.init();
+        } catch (Exception e) {
+            junit.framework.Assert.fail("Database initialization failed: " + e.getMessage());
+        }
         db.close();
     }
 }
