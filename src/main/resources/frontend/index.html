@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLSMetrics 监控仪表盘</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="header">
+        <h1>SLSMetrics 监控仪表盘</h1>
+        <div class="header-controls">
+            <div class="range-selector">
+                <span class="range-label">时间范围：</span>
+                <button class="range-btn" data-range="30m">30m</button>
+                <button class="range-btn active" data-range="1h">1h</button>
+                <button class="range-btn" data-range="6h">6h</button>
+                <button class="range-btn" data-range="1d">1d</button>
+                <button class="range-btn" data-range="7d">7d</button>
+            </div>
+            <div class="refresh-control">
+                <span class="refresh-indicator" id="refreshIndicator"></span>
+                <span class="refresh-label" id="refreshLabel">自动刷新 10s</span>
+                <button class="refresh-btn" id="refreshToggle">暂停</button>
+                <button class="refresh-btn refresh-now" id="refreshNow">立即刷新</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- KPI 卡片 -->
+    <section class="kpi-section">
+        <div class="kpi-card" id="kpi-nodes">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">总节点数</div>
+        </div>
+        <div class="kpi-card" id="kpi-memory">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">总内存 (GB)</div>
+        </div>
+        <div class="kpi-card" id="kpi-vcore">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">总 vCore</div>
+        </div>
+        <div class="kpi-card" id="kpi-container">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">活跃容器</div>
+        </div>
+        <div class="kpi-card" id="kpi-app">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">活跃应用</div>
+        </div>
+        <div class="kpi-card" id="kpi-pending">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">待定容器</div>
+        </div>
+        <div class="kpi-card" id="kpi-reserved">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">预留容器</div>
+        </div>
+        <div class="kpi-card" id="kpi-submitted">
+            <div class="kpi-value">--</div>
+            <div class="kpi-label">已提交应用</div>
+        </div>
+    </section>
+
+    <!-- 节点健康状态 -->
+    <div class="node-health-section">
+        <div class="node-health-detail">等待数据...</div>
+    </div>
+
+    <!-- 图表区域 2x2 -->
+    <section class="charts-section">
+        <div class="chart-wrapper" id="chart-container-wrapper">
+            <div class="chart-title">容器调度趋势</div>
+            <div class="chart-container" id="chart-container"></div>
+        </div>
+        <div class="chart-wrapper" id="chart-resource-wrapper">
+            <div class="chart-title">资源利用率</div>
+            <div class="chart-container" id="chart-resource"></div>
+        </div>
+        <div class="chart-wrapper" id="chart-application-wrapper">
+            <div class="chart-title">应用状态</div>
+            <div class="chart-container" id="chart-application"></div>
+        </div>
+        <div class="chart-wrapper" id="chart-heartbeat-wrapper">
+            <div class="chart-title">心跳延迟</div>
+            <div class="chart-container" id="chart-heartbeat"></div>
+        </div>
+        <div class="chart-wrapper" id="chart-nodes-wrapper">
+            <div class="chart-title">可用节点</div>
+            <div class="chart-container" id="chart-nodes"></div>
+        </div>
+        <div class="chart-wrapper" id="chart-resource-avail-wrapper">
+            <div class="chart-title">可用资源</div>
+            <div class="chart-container" id="chart-resource-avail"></div>
+        </div>
+    </section>
+
+    <!-- 队列状态表格 -->
+    <section class="queue-section">
+        <h2>队列调度状态</h2>
+        <div class="table-wrapper">
+            <table class="queue-table" id="queueTable">
+                <thead>
+                    <tr>
+                        <th>队列名</th>
+                        <th>绝对容量 (%)</th>
+                        <th>已用容量 (%)</th>
+                        <th>待定应用</th>
+                        <th>活跃应用</th>
+                    </tr>
+                </thead>
+                <tbody id="queueTableBody">
+                    <tr><td colspan="5" class="no-data">等待数据...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="chart-wrapper" id="chart-queue-pending-wrapper">
+            <div class="chart-title">各队列待定容器</div>
+            <div class="chart-container" id="chart-queue-pending"></div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <span>SLSMetrics &copy; YARN SLS</span>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>

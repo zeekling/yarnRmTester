@@ -113,7 +113,7 @@ public class MetricsHttpHandler implements HttpHandler {
             MetricsData metricsData = collector.getMetricsData();
 
             Map<String, Object> nodeData = new HashMap<>();
-            nodeData.put("totalHeartbeats", metricsData.getTotalContainersAllocated() + metricsData.getTotalContainersReleased());
+            nodeData.put("totalHeartbeats", metricsData.getSuccessfulHeartbeats() + metricsData.getFailedHeartbeats());
             nodeData.put("successfulHeartbeats", metricsData.getSuccessfulHeartbeats());
             nodeData.put("failedHeartbeats", metricsData.getFailedHeartbeats());
 

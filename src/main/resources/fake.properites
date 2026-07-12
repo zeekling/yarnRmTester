@@ -17,3 +17,17 @@ yarn.fake.job.queue=default
 yarn.monitor.enabled=true
 yarn.monitor.http.port=28080
 yarn.monitor.collect.interval=5000
+
+# SLSMetrics 采集与 Web 仪表盘配置
+yarn.metrics.collect.interval=5000
+yarn.metrics.store.size=3600
+yarn.metrics.web.port=28081
+yarn.metrics.server.url=http://hadoop01:8088/jmx?qry=Hadoop:*
+yarn.metrics.nm.collect.enabled=false
+yarn.metrics.nm.url=http://localhost:28080
+
+# SLSMetrics 数据库配置（SQLite）
+yarn.metrics.db.path=target/metrics/metrics.db
+yarn.metrics.db.batch.size=10
+yarn.metrics.db.retention.days=7
+yarn.metrics.db.cleanup.interval=3600000
